@@ -106,18 +106,35 @@
     }
   }
 
+  let dicaTimer = null;
+
   function pedirLocalizacao() {
     const btn = $("btn-gps");
     $("gps-negado").classList.add("hidden");
     $("gps-erro").classList.add("hidden");
+    $("gps-dica").classList.add("hidden");
+    if (!window.isSecureContext) {
+      // Sem https o navegador recusa a localização sem perguntar: explicar a causa real
+      $("gps-status").textContent = "Não é possível usar a localização neste endereço.";
+      $("gps-inseguro").classList.remove("hidden");
+      btn.classList.add("hidden");
+      return;
+    }
     if (!("geolocation" in navigator)) {
       $("gps-erro-texto").textContent = "Este navegador não oferece localização. Use outro navegador ou peça ao administrador um endereço fixo.";
       $("gps-erro").classList.remove("hidden");
       return;
     }
     btn.classList.add("loading"); btn.disabled = true;
-    $("gps-status").textContent = "Obtendo a sua localização…";
+    $("gps-status").textContent = "Aguardando a sua permissão para usar a localização…";
+    clearTimeout(dicaTimer);
+    // Se a pergunta não aparecer (alguns navegadores a escondem na barra de endereço), mostra a dica e libera o botão
+    dicaTimer = setTimeout(() => {
+      $("gps-dica").classList.remove("hidden");
+      btn.classList.remove("loading"); btn.disabled = false;
+    }, 4000);
     navigator.geolocation.getCurrentPosition((pos) => {
+      clearTimeout(dicaTimer); $("gps-dica").classList.add("hidden");
       btn.classList.remove("loading"); btn.disabled = false;
       const { latitude, longitude, accuracy } = pos.coords;
       estado.partida = { lat: latitude, lng: longitude, precisao_m: accuracy };
@@ -132,6 +149,7 @@
       mostrarPartidaNoMapa(latitude, longitude, accuracy);
       atualizarAcoes();
     }, (erro) => {
+      clearTimeout(dicaTimer); $("gps-dica").classList.add("hidden");
       btn.classList.remove("loading"); btn.disabled = false;
       estado.partida = null;
       atualizarAcoes();
@@ -858,7 +876,13 @@
       }
     } else {
       $("partida-gps").classList.remove("hidden");
-      pedirLocalizacao(); // pede a permissão logo ao abrir, como combinado
+      pedirLocalizacao(); // pede a permissão logo ao abrir
+      // Quando a pessoa libera a permissão nas configurações do navegador, segue sem recarregar
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: "geolocation" }).then((st) => {
+          st.onchange = () => { if (st.state === "granted" && !estado.partida) pedirLocalizacao(); };
+        }).catch(() => {});
+      }
     }
     if (!c.geocodificacao_ativa) toast("A localização de endereços está desativada pelo administrador.", "erro");
     renderParadas();

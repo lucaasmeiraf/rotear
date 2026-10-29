@@ -41,8 +41,15 @@
         </div>
       </div>
       <div class="callout warn hidden mt-16" id="gps-erro" role="alert">{{ icone("alerta") }}<span id="gps-erro-texto"></span></div>
+      <div class="callout danger hidden mt-16" id="gps-inseguro" role="alert">{{ icone("escudo") }}
+        <span><strong>Conexão não segura.</strong> O navegador só libera a localização em endereços com cadeado (https://).
+          Abra o Rotear pelo endereço seguro informado pelo administrador.</span>
+      </div>
+      <div class="callout info hidden mt-16" id="gps-dica">{{ icone("info") }}
+        <span>O navegador não mostrou a pergunta? Procure o ícone de localização na barra de endereço, ou toque em <strong>Permitir localização</strong>.</span>
+      </div>
       <div class="row wrap mt-16">
-        <button class="btn primary" id="btn-gps" type="button"><span class="spin"></span>{{ icone("localizar") }}<span>Usar minha localização</span></button>
+        <button class="btn primary" id="btn-gps" type="button"><span class="spin"></span>{{ icone("localizar") }}<span>Permitir localização</span></button>
         <span class="badge" id="gps-precisao"></span>
       </div>
     </div>

@@ -54,7 +54,9 @@ services:
 
   # Pré-processamento (roda uma única vez): docker compose --profile prep run --rm osrm-prep ...
   osrm-prep:
-    build: ./osrm
+    build:
+      context: ./osrm
+      target: ferramentas
     profiles: ["prep"]
     volumes:
       - osrm_data:/data

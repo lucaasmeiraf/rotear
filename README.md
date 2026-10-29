@@ -197,6 +197,7 @@ Disco: 198 MB do .pbf Centro-Oeste, 65 MB do recorte e 215 MB dos arquivos `.osr
 - Municípios detectados como vizinhos: Águas Lindas, Cidade Ocidental, Cristalina, Formosa, Novo Gama, Padre Bernardo, Planaltina, Santo Antônio do Descoberto e Valparaíso. Luziânia e Cabeceiras não fazem divisa no OSM, mas ficam dentro da área.
 - `osrm-routed` roda com `--max-table-size 500`; o padrão é 100. Uma matriz de 201×201 responde em cerca de 0,3 s.
 - Em dev, o OSRM fica acessível em `127.0.0.1:8003`.
+- **Produção:** o `osrm/Dockerfile` tem as mesmas etapas, executadas dentro do build da imagem final. Assim o servidor não depende de volumes copiados à mão (veja "Publicar no Easypanel"). O script local usa a etapa `ferramentas` desse mesmo Dockerfile.
 
 ## Desenvolvimento (hot reload)
 
@@ -230,26 +231,63 @@ gunzip -c ~/backups/rotear/AAAA-MM-DD_HHMM.sql.gz \
   | docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1'
 ```
 
-## Publicar no Easypanel
+## Publicar no Easypanel (homologação e produção)
 
-1. Envie o projeto para o GitHub: `git remote add origin ...` e depois `git push -u origin main`. O `.env` não vai junto, porque está no `.gitignore`.
-2. No Easypanel, crie um **Postgres** gerenciado ou um serviço App com a imagem `postgres:16` e um volume. Anote a URL de conexão interna.
-3. Crie o serviço **OSRM**:
-   - um App com a imagem `ghcr.io/project-osrm/osrm-backend:v26.10.0-debian`;
-   - comando `osrm-routed --algorithm mld --max-table-size 500 /data/df-entorno.osrm`;
-   - um volume montado em `/data`, com os arquivos gerados pelo `scripts/preparar-osrm.sh`;
-   - sem domínio público, porque só a API acessa;
-   - para levar os dados: copie os `df-entorno.osrm*` do volume `rotear_osrm_data` para o volume do serviço, ou rode o preparo no servidor de destino.
-4. Crie o serviço **App** do Rotear:
-   - Source: GitHub, este repositório, branch `main`.
-   - Build: **Dockerfile** (o arquivo da raiz).
-   - Environment: `DATABASE_URL`, `SECRET_KEY`, `OSRM_URL=http://NOME_DO_SERVICO_OSRM:5000`, `NOMINATIM_EMAIL` e `FORWARDED_ALLOW_IPS` (veja "Variáveis de ambiente").
-   - Domains: o domínio desejado, apontando para a **porta 8000** do container.
-   - As migrações rodam sozinhas no início (`start.sh`).
-5. Crie o primeiro admin: `python -m app.cli criar-admin ...`, pelo console do serviço no Easypanel.
-6. Faça o deploy e teste `https://SEU_DOMINIO/health`.
+O cadeado (HTTPS) só existe com um domínio servido pelo Traefik do Easypanel, que emite o certificado. Pelo túnel SSH (`http://localhost`), o navegador mostra o ícone de informação, e não o cadeado: isso é normal em desenvolvimento. **No celular, o Rotear só funciona com HTTPS**, porque o navegador exige conexão segura para liberar a localização.
 
-O Easypanel usa o `Dockerfile`, não os arquivos `compose*.yml`. Os arquivos de compose servem só para o ambiente local e de desenvolvimento.
+Repositório: `github.com/lucaasmeiraf/rotear` (branch `main`). Crie um projeto `rotear` no Easypanel com 3 serviços.
+
+### 1. Banco: serviço **Postgres**
+- Versão 16.
+- Depois de criado, copie a **URL de conexão interna**. O Rotear aceita tanto `postgres://` quanto `postgresql://`.
+
+### 2. Rotas: serviço **App** chamado `osrm`
+| Campo | Valor |
+|---|---|
+| Source | GitHub · `lucaasmeiraf/rotear` · branch `main` |
+| Build | **Dockerfile** |
+| Build Path | `/osrm` |
+| Domains | **nenhum** (só a API acessa) |
+| Porta interna | 5000 |
+
+- O build baixa o mapa do Geofabrik, recorta o DF e o entorno e prepara o OSRM. Leva uns 15 minutos na primeira vez e usa até 2 GB de RAM. Nenhum volume é necessário.
+- Para atualizar o mapa, faça um novo deploy sem cache.
+
+### 3. Aplicação: serviço **App** chamado `app`
+| Campo | Valor |
+|---|---|
+| Source | GitHub · `lucaasmeiraf/rotear` · branch `main` |
+| Build | **Dockerfile** |
+| Build Path | `/` |
+| Domains | o seu domínio (ou o domínio automático do Easypanel) → **porta 8000**, com **HTTPS ligado** |
+
+Environment:
+
+```
+DATABASE_URL=<URL interna do Postgres>
+SECRET_KEY=<gere com: openssl rand -hex 32>
+OSRM_URL=http://<nome interno do serviço osrm>:5000
+NOMINATIM_EMAIL=<e-mail de contato>
+FORWARDED_ALLOW_IPS=*
+```
+
+- **Nome interno do OSRM:** o Easypanel mostra o host interno de cada serviço na página dele. Costuma ser `<projeto>_<serviço>`, por exemplo `rotear_osrm`.
+- **`FORWARDED_ALLOW_IPS=*`:** é seguro aqui porque o container só recebe tráfego pelo Traefik. Ele permite ler o IP real do cliente, usado no limite de tentativas de login.
+- As migrações do banco rodam sozinhas a cada deploy (`start.sh`).
+- O Easypanel usa só os `Dockerfile`; os arquivos `compose*.yml` servem apenas para o desenvolvimento local.
+
+### 4. Primeiro acesso
+No console do serviço `app`, rode `python -m app.cli criar-admin --email ... --nome "..."`.
+
+### Roteiro de homologação
+- [ ] `https://SEU_DOMINIO/health` responde `{"status":"ok","db":"ok","osrm":"ok"}`.
+- [ ] O navegador mostra o **cadeado**, e o certificado é válido (clique no cadeado → "Conexão segura").
+- [ ] **No celular**, ao abrir Planejar, o navegador **pergunta** se pode usar a localização, e o mapa mostra o ponto com a precisão em metros.
+- [ ] Ao negar a localização, aparecem as instruções de como liberar.
+- [ ] O admin cria um operador, e o operador **não** vê nem acessa Administração (tentar `/admin` dá "Acesso negado").
+- [ ] Rodar o planejamento com `exemplos/entregas-exemplo.xlsx` até os links do Google Maps, e abrir um trecho no **aplicativo** Google Maps.
+- [ ] "Enviar no WhatsApp" abre o WhatsApp com o texto e os links prontos.
+- [ ] "Exportar .xlsx" baixa a planilha com as abas Rotas, Resumo e Links.
 
 ## Regras do app
 

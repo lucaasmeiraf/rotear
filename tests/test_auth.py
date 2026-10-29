@@ -105,3 +105,10 @@ def test_cli_criar_admin():
         env={**os.environ, "ROTEAR_SENHA": "curta"}, capture_output=True, text=True,
     )
     assert curta.returncode == 1
+
+
+def test_url_do_banco_aceita_formato_do_easypanel():
+    from app.db import url_sqlalchemy
+    assert url_sqlalchemy("postgres://u:s@h:5432/b") == "postgresql+psycopg://u:s@h:5432/b"
+    assert url_sqlalchemy("postgresql://u:s@h:5432/b") == "postgresql+psycopg://u:s@h:5432/b"
+    assert url_sqlalchemy("postgresql+psycopg://u:s@h/b") == "postgresql+psycopg://u:s@h/b"
