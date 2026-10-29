@@ -1,0 +1,20 @@
+# Override de desenvolvimento:
+#   docker compose -f compose.yml -f compose.dev.yml up -d --build
+services:
+  api:
+    build:
+      args:
+        DEV: "1"
+    volumes:
+      - ./app:/srv/app
+      - ./alembic:/srv/alembic
+      - ./tests:/srv/tests
+    command: ["./start.sh", "--reload"]
+
+  db:
+    ports:
+      - "127.0.0.1:8002:5432"
+
+  osrm:
+    ports:
+      - "127.0.0.1:8003:5000"

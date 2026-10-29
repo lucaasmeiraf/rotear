@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block conteudo %}
+<div class="card empty" style="max-width:480px;margin:40px auto">
+  <span class="bubble">{{ icone("bloquear", "lg") }}</span>
+  <h1 style="font-size:1.3rem">{{ titulo }}</h1>
+  <p>{{ mensagem }}</p>
+  <a class="btn primary mt-8" href="/">Voltar ao início</a>
+</div>
+{% endblock %}

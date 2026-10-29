@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block titulo %}Configurações{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/vendor/leaflet-1.9.4/leaflet.css">{% endblock %}
+{% block conteudo %}
+{% include "admin/_topo.html" %}
+
+<form id="form-config" class="stack" novalidate>
+  <section class="card card-pad">
+    <div class="section-title">{{ icone("pino") }}<h2>Ponto de partida</h2></div>
+    <div class="segmented" role="radiogroup" aria-label="Modo do ponto de partida">
+      <label><input type="radio" name="modo_partida" value="localizacao_atual"><span>{{ icone("localizar", "sm") }}Localização atual</span></label>
+      <label><input type="radio" name="modo_partida" value="endereco_fixo"><span>{{ icone("pino", "sm") }}Endereço fixo</span></label>
+    </div>
+    <p class="subtle mt-8" id="ajuda-atual">Cada pessoa usa a localização do próprio aparelho. O navegador pede permissão após o login.</p>
+
+    <div id="bloco-fixo" class="form mt-16">
+      <div class="field"><span>Endereço</span>
+        <div class="input-group">
+          <input type="search" name="partida_endereco" id="endereco" placeholder="Ex.: SIA Trecho 3, Brasília - DF" maxlength="300" autocomplete="off">
+          <button type="button" class="btn" id="btn-buscar"><span class="spin"></span>{{ icone("localizar", "sm") }}<span>Buscar</span></button>
+        </div>
+        <small>Busque o endereço e ajuste o pino arrastando-o ou tocando no mapa. Operadores não podem alterar este ponto.</small>
+      </div>
+      <div class="map" id="mapa"></div>
+      <div class="row between wrap">
+        <span class="subtle" id="coords">Nenhum ponto definido.</span>
+        <span class="badge" id="badge-ponto"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card-pad">
+    <div class="section-title">{{ icone("caminhao") }}<h2>Cálculo das rotas</h2></div>
+    <div class="grid cols-2">
+      <label class="field"><span>Tempo de otimização (segundos)</span>
+        <input type="number" name="solver_tempo_limite_s" min="5" max="300" step="1" inputmode="numeric" required>
+        <small>O cálculo usa sempre o modo de maior qualidade e leva este tempo inteiro. Padrão: 30 s.</small>
+      </label>
+      <label class="field"><span>Máximo de paradas por planejamento</span>
+        <input type="number" name="max_paradas" min="1" max="{{ dados.limite_paradas }}" step="1" inputmode="numeric" required>
+        <small>Entre 1 e {{ dados.limite_paradas }}. Padrão: 200.</small>
+      </label>
+    </div>
+  </section>
+
+  <section class="card card-pad">
+    <div class="section-title">{{ icone("mapa") }}<h2>Localização de endereços</h2></div>
+    <label class="switch">
+      <span><strong>Geocodificação ativa</strong><br><span class="subtle">Desligue para interromper imediatamente as consultas ao serviço de mapas
+        (por exemplo, se o provedor pedir).</span></span>
+      <input type="checkbox" name="geocodificacao_ativa">
+    </label>
+  </section>
+
+  <div class="row" style="justify-content:flex-end">
+    <button type="submit" class="btn primary" id="btn-salvar"><span class="spin"></span>{{ icone("check") }}Salvar configurações</button>
+  </div>
+</form>
+
+<script type="application/json" id="dados">{{ dados | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/leaflet-1.9.4/leaflet.js"></script>
+<script src="/static/js/mapa.js?v=3"></script>
+<script src="/static/js/admin-config.js?v=3"></script>
+{% endblock %}

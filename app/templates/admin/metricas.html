@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block titulo %}Métricas{% endblock %}
+{% block conteudo %}
+{% include "admin/_topo.html" %}
+
+<div class="row between wrap" style="margin-bottom:16px">
+  <p class="muted">Uso do sistema, sem nenhum endereço.</p>
+  <div class="segmented" style="width:auto" role="radiogroup" aria-label="Período">
+    <label><input type="radio" name="periodo" value="7"><span>7 dias</span></label>
+    <label><input type="radio" name="periodo" value="30" checked><span>30 dias</span></label>
+    <label><input type="radio" name="periodo" value="90"><span>90 dias</span></label>
+  </div>
+</div>
+
+<div class="grid cols-4" id="stats">
+  <div class="card stat"><div class="label">Planejamentos</div><div class="value" data-v="planejamentos">–</div></div>
+  <div class="card stat"><div class="label">Paradas roteirizadas</div><div class="value" data-v="paradas">–</div></div>
+  <div class="card stat"><div class="label">Km planejados</div><div class="value" data-v="km">–</div><div class="hint" data-v="tempo">–</div></div>
+  <div class="card stat"><div class="label">Cálculo médio</div><div class="value" data-v="calculo">–</div><div class="hint" data-v="motoristas">–</div></div>
+</div>
+
+<section class="card mt-16">
+  <div class="card-head"><div><h2>Planejamentos por dia</h2><p class="subtle" id="sub-grafico"></p></div></div>
+  <div class="card-pad" style="padding-top:12px">
+    <div id="grafico" class="grafico" role="img" aria-label="Planejamentos por dia"></div>
+    <div class="grafico-tip hidden" id="grafico-tip" role="status"></div>
+  </div>
+</section>
+
+<div class="grid cols-2 mt-16">
+  <section class="card">
+    <div class="card-head" style="padding-bottom:6px"><h2>Por usuário</h2></div>
+    <ul class="list" id="por-usuario"></ul>
+  </section>
+  <section class="card">
+    <div class="card-head" style="padding-bottom:6px"><h2>Últimos cálculos</h2></div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Quando</th><th>Usuário</th><th class="num">Paradas</th><th class="num">Mot.</th><th class="num">Km</th><th class="num">Cálculo</th></tr></thead>
+        <tbody id="recentes"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script type="application/json" id="dados">{{ dados | tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-metricas.js?v=3"></script>{% endblock %}

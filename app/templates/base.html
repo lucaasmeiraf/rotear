@@ -1,0 +1,57 @@
+{% from "_icones.html" import icone with context %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3056f5">
+  <title>{% block titulo %}Rotear{% endblock %} · Rotear</title>
+  <link rel="icon" href="/static/img/icone.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css?v=3">
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block classe_body %}{% endblock %}">
+{% block shell %}
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">{{ icone("rota") }}</span>Rotear</a>
+    {% if usuario %}
+    <nav class="topnav" aria-label="Principal">
+      <a href="/planejar" {% if secao == "planejar" %}aria-current="page"{% endif %}>{{ icone("mapa") }}Planejar</a>
+      {% if usuario.papel == "admin" %}
+      <a href="/admin" {% if secao == "admin" %}aria-current="page"{% endif %}>{{ icone("config") }}Administração</a>
+      {% endif %}
+      <a href="/privacidade" {% if secao == "privacidade" %}aria-current="page"{% endif %}>{{ icone("escudo") }}Privacidade</a>
+    </nav>
+    <span class="spacer"></span>
+    <div class="user-chip">
+      <span class="who"><strong>{{ usuario.nome }}</strong><small>{{ "Administrador" if usuario.papel == "admin" else "Operador" }}</small></span>
+      <span class="avatar" aria-hidden="true">{{ usuario.nome[:1] | upper }}</span>
+      <form method="post" action="/logout" class="hidden-mobile">
+        <button class="btn ghost sm icon-only" type="submit" title="Sair" aria-label="Sair">{{ icone("sair") }}</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+
+  <main class="page {% block classe_page %}{% endblock %}">
+    {% block conteudo %}{% endblock %}
+  </main>
+
+  {% if usuario %}
+  <nav class="tabbar" aria-label="Principal">
+    <a href="/planejar" {% if secao == "planejar" %}aria-current="page"{% endif %}>{{ icone("mapa") }}Planejar</a>
+    {% if usuario.papel == "admin" %}
+    <a href="/admin" {% if secao == "admin" %}aria-current="page"{% endif %}>{{ icone("config") }}Admin</a>
+    {% endif %}
+    <a href="/privacidade" {% if secao == "privacidade" %}aria-current="page"{% endif %}>{{ icone("escudo") }}Privacidade</a>
+    <form method="post" action="/logout" style="flex:1;display:flex">
+      <button type="submit">{{ icone("sair") }}Sair</button>
+    </form>
+  </nav>
+  {% endif %}
+{% endblock %}
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/js/app.js?v=3"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

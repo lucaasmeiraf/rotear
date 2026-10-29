@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block titulo %}Planejar{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/vendor/leaflet-1.9.4/leaflet.css">{% endblock %}
+{% block classe_page %}planejar{% endblock %}
+{% block conteudo %}
+<div class="plan-head">
+  <div>
+    <h1>Planejar rotas</h1>
+    <p class="aviso-efemero">{{ icone("info", "sm") }}<span>Nada é salvo. Ao sair desta página, o planejamento é perdido.</span></p>
+  </div>
+</div>
+
+<ol class="stepper" id="stepper" aria-label="Etapas">
+  <li data-passo="1"><span class="dot">1</span><span class="nome">Partida</span></li>
+  <li data-passo="2"><span class="dot">2</span><span class="nome">Endereços</span></li>
+  <li data-passo="3"><span class="dot">3</span><span class="nome">Conferir</span></li>
+  <li data-passo="4"><span class="dot">4</span><span class="nome">Motoristas</span></li>
+  <li data-passo="5"><span class="dot">5</span><span class="nome">Rotas</span></li>
+</ol>
+
+<!-- 1. Ponto de partida -->
+<section class="passo" data-passo="1">
+  <div class="card card-pad">
+    <div class="section-title">{{ icone("pino") }}<h2>De onde saem as entregas?</h2></div>
+
+    <div id="partida-fixa" class="hidden">
+      <div class="callout info">{{ icone("pino") }}<span><strong id="partida-fixa-texto"></strong><br>Ponto de partida definido pelo administrador.</span></div>
+    </div>
+
+    <div id="partida-gps" class="hidden">
+      <p class="muted" id="gps-status">Vamos usar a localização deste aparelho como ponto de partida.</p>
+      <div class="callout danger hidden mt-16" id="gps-negado" role="alert">{{ icone("alerta") }}
+        <div>
+          <strong>A permissão de localização foi negada.</strong> Sem ela não é possível calcular as rotas.
+          <ul class="dicas">
+            <li><strong>Android (Chrome):</strong> toque no ícone à esquerda do endereço do site → Permissões → Localização → Permitir.</li>
+            <li><strong>iPhone (Safari):</strong> Ajustes → Apps → Safari → Localização → Perguntar ou Permitir; depois, recarregue a página.</li>
+            <li><strong>Computador:</strong> clique no ícone à esquerda do endereço do site → Localização → Permitir.</li>
+          </ul>
+          Depois de liberar, toque em <strong>Tentar novamente</strong>.
+        </div>
+      </div>
+      <div class="callout warn hidden mt-16" id="gps-erro" role="alert">{{ icone("alerta") }}<span id="gps-erro-texto"></span></div>
+      <div class="row wrap mt-16">
+        <button class="btn primary" id="btn-gps" type="button"><span class="spin"></span>{{ icone("localizar") }}<span>Usar minha localização</span></button>
+        <span class="badge" id="gps-precisao"></span>
+      </div>
+    </div>
+
+    <div class="map mt-16 hidden" id="mapa-partida"></div>
+  </div>
+</section>
+
+<!-- 2. Endereços -->
+<section class="passo" data-passo="2">
+  <div class="card card-pad">
+    <div class="section-title">{{ icone("lista") }}<h2>Endereços de entrega</h2></div>
+    <div class="segmented" role="tablist" aria-label="Forma de entrada">
+      <label><input type="radio" name="fonte" value="planilha" checked><span>{{ icone("upload", "sm") }}Planilha</span></label>
+      <label><input type="radio" name="fonte" value="colar"><span>{{ icone("colar", "sm") }}Colar</span></label>
+      <label><input type="radio" name="fonte" value="manual"><span>{{ icone("editar", "sm") }}Digitar</span></label>
+    </div>
+
+    <div class="fonte mt-16" data-fonte="planilha">
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="arquivo" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" class="sr-only">
+        <span class="bubble">{{ icone("upload", "lg") }}</span>
+        <strong>Escolha a planilha</strong>
+        <span class="subtle">.xlsx ou .csv, até 5 MB. Também dá para arrastar o arquivo até aqui.</span>
+      </label>
+      <div id="mapeamento" class="hidden">
+        <div class="row between wrap">
+          <div><strong id="map-arquivo"></strong><div class="subtle" id="map-linhas"></div></div>
+          <button class="btn ghost sm" type="button" id="btn-trocar-arquivo">{{ icone("upload", "sm") }}Trocar arquivo</button>
+        </div>
+        <p class="muted mt-16">Indique as colunas da planilha. Só a coluna do endereço é obrigatória.</p>
+        <div class="grid cols-2 mt-16" id="map-campos"></div>
+        <div class="previa mt-16">
+          <div class="label">Como os endereços vão ficar</div>
+          <ol id="map-previa"></ol>
+        </div>
+        <div class="row mt-16" style="justify-content:flex-end">
+          <button class="btn primary" type="button" id="btn-usar-planilha">{{ icone("check") }}<span>Adicionar endereços</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="fonte mt-16 hidden" data-fonte="colar">
+      <label class="field"><span>Um endereço por linha</span>
+        <textarea id="texto-colado" rows="8" placeholder="SQS 308 Bloco C, Asa Sul, Brasília - DF&#10;QNM 34 Conjunto H Casa 5, Ceilândia - DF"></textarea>
+      </label>
+      <div class="row mt-16" style="justify-content:flex-end">
+        <button class="btn primary" type="button" id="btn-usar-colado">{{ icone("check") }}<span>Adicionar endereços</span></button>
+      </div>
+    </div>
+
+    <div class="fonte mt-16 hidden" data-fonte="manual">
+      <form class="input-group" id="form-manual" autocomplete="off">
+        <input type="text" id="texto-manual" placeholder="Ex.: Rodoviária do Plano Piloto, Brasília - DF" maxlength="300" aria-label="Endereço">
+        <button class="btn primary icon-only" type="submit" aria-label="Adicionar">{{ icone("mais") }}</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mt-16" id="card-paradas">
+    <div class="card-head" style="padding-bottom:12px">
+      <div><h2>Paradas</h2><p class="subtle" id="resumo-paradas">Nenhum endereço ainda.</p></div>
+      <button class="btn ghost sm hidden" type="button" id="btn-limpar">{{ icone("lixeira", "sm") }}Limpar</button>
+    </div>
+    <ul class="list paradas" id="lista-paradas"></ul>
+  </div>
+</section>
+
+<!-- 3. Conferir -->
+<section class="passo" data-passo="3">
+  <div class="card card-pad" id="geo-progresso">
+    <div class="row between"><h2 id="geo-titulo">Localizando endereços…</h2><span class="subtle" id="geo-conta"></span></div>
+    <div class="barra-progresso mt-16"><span id="geo-barra"></span></div>
+    <p class="subtle mt-8" id="geo-eta"></p>
+  </div>
+  <div class="callout danger hidden" id="geo-falha" role="alert">{{ icone("alerta") }}
+    <div><span id="geo-falha-texto"></span><div class="mt-8"><button class="btn sm" type="button" id="btn-geo-repetir">{{ icone("reativar", "sm") }}Tentar novamente</button></div></div>
+  </div>
+
+  <div class="conferir mt-16 hidden" id="conferir">
+    <div class="map tall" id="mapa-conferir"></div>
+    <div>
+      <div class="card" id="card-atencao">
+        <div class="card-head" style="padding-bottom:12px"><div><h2 id="atencao-titulo"></h2><p class="subtle" id="atencao-sub"></p></div></div>
+        <ul class="list" id="lista-atencao"></ul>
+      </div>
+      <div class="legenda mt-16">
+        <span><i class="ok"></i>Localizado</span><span><i class="atencao"></i>Precisa conferir</span><span><i class="manual"></i>Ajustado por você</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Motoristas -->
+<section class="passo" data-passo="4">
+  <div class="card card-pad">
+    <div class="section-title">{{ icone("caminhao") }}<h2>Motoristas</h2></div>
+    <div class="row between wrap">
+      <span class="label">Quantos motoristas?</span>
+      <div class="contador">
+        <button class="btn icon-only" type="button" id="mot-menos" aria-label="Menos um motorista"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+        <output id="mot-qtd" aria-live="polite">1</output>
+        <button class="btn icon-only" type="button" id="mot-mais" aria-label="Mais um motorista">{{ icone("mais") }}</button>
+      </div>
+    </div>
+    <div class="grid cols-2 mt-16" id="mot-nomes"></div>
+    <p class="subtle mt-8">Nomes são opcionais e aparecem só nesta tela, nos links e na planilha exportada.</p>
+  </div>
+
+  <div class="card card-pad mt-16">
+    <div class="section-title">{{ icone("config") }}<h2>Regras da rota</h2></div>
+    <div class="form">
+      <label class="field"><span>Máximo de paradas por motorista</span>
+        <input type="number" id="max-por-motorista" min="1" step="1" inputmode="numeric" placeholder="Sem limite">
+        <small>Deixe vazio para não limitar. O que não couber aparece como não alocado.</small>
+      </label>
+      <div class="field"><span>Onde a rota termina?</span>
+        <div class="segmented">
+          <label><input type="radio" name="fim" value="ultima_entrega" checked><span>Na última entrega</span></label>
+          <label><input type="radio" name="fim" value="partida"><span>Volta à partida</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="callout info mt-16">{{ icone("relogio") }}<span id="resumo-calculo"></span></div>
+</section>
+
+<!-- 5. Resultado -->
+<section class="passo" data-passo="5">
+  <div class="grid cols-4" id="res-stats"></div>
+  <div class="resultado mt-16">
+    <div class="map tall" id="mapa-resultado"></div>
+    <div id="res-motoristas" class="stack"></div>
+  </div>
+  <div class="card mt-16 hidden" id="res-nao-alocadas">
+    <div class="card-head" style="padding-bottom:12px"><div><h2>Não alocadas</h2><p class="subtle">Paradas que ficaram fora das rotas, com o motivo.</p></div></div>
+    <ul class="list" id="lista-nao-alocadas"></ul>
+  </div>
+  <div class="acoes-final mt-16">
+    <button class="btn" type="button" id="btn-exportar"><span class="spin"></span>{{ icone("download") }}Exportar .xlsx</button>
+    <button class="btn" type="button" id="btn-novo">{{ icone("mais") }}Novo plano</button>
+  </div>
+</section>
+
+<div class="acoes-passo" id="acoes">
+  <button class="btn" type="button" id="btn-voltar">{{ icone("voltar") }}<span>Voltar</span></button>
+  <button class="btn primary" type="button" id="btn-avancar"><span class="spin"></span><span id="btn-avancar-texto">Continuar</span>{{ icone("seta") }}</button>
+</div>
+
+<div class="calculando hidden" id="calculando" role="alertdialog" aria-modal="true" aria-labelledby="calc-titulo">
+  <div class="card card-pad calc-card">
+    <svg class="anel" viewBox="0 0 120 120" aria-hidden="true">
+      <circle cx="60" cy="60" r="52" class="anel-fundo"/>
+      <circle cx="60" cy="60" r="52" class="anel-progresso" id="anel"/>
+    </svg>
+    <div class="anel-texto"><strong id="calc-seg"></strong><span>s</span></div>
+    <h2 id="calc-titulo">Otimizando as rotas</h2>
+    <p class="muted" id="calc-msg">Calculando distâncias reais pelas ruas…</p>
+  </div>
+</div>
+
+<dialog class="sheet" id="dlg-novo" aria-labelledby="t-novo-plan">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head"><h2 id="t-novo-plan">Começar de novo?</h2></div>
+  <div class="sheet-body"><p class="muted">O planejamento atual será descartado. Nada fica salvo: exporte ou envie os links antes, se precisar.</p></div>
+  <div class="sheet-foot">
+    <button type="button" class="btn" data-fechar>Cancelar</button>
+    <button type="button" class="btn danger" id="btn-novo-ok">Descartar e começar</button>
+  </div>
+</dialog>
+
+<template id="tpl-ico-lixeira">{{ icone("lixeira", "sm") }}</template>
+<template id="tpl-ico-copiar">{{ icone("copiar", "sm") }}</template>
+<template id="tpl-ico-mapa">{{ icone("mapa", "sm") }}</template>
+<template id="tpl-ico-msg">{{ icone("mensagem", "sm") }}</template>
+<template id="tpl-ico-check">{{ icone("check", "sm") }}</template>
+<template id="tpl-ico-pino">{{ icone("pino", "sm") }}</template>
+<template id="tpl-ico-localizar">{{ icone("localizar", "sm") }}</template>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/leaflet-1.9.4/leaflet.js"></script>
+<script src="/static/js/mapa.js?v=3"></script>
+<script src="/static/js/planejar.js?v=3"></script>
+{% endblock %}

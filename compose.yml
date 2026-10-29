@@ -1,0 +1,66 @@
+name: rotear
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *defaults
+    build: .
+    env_file: .env
+    ports:
+      - "127.0.0.1:8001:8000"
+    mem_limit: 512m
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_healthy
+
+  db:
+    <<: *defaults
+    image: postgres:16
+    env_file: .env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Roteamento pelas ruas (perfil carro). Os dados vêm do scripts/preparar-osrm.sh.
+  osrm:
+    <<: *defaults
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    user: "65534:65534"
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "500", "/data/df-entorno.osrm"]
+    volumes:
+      - osrm_data:/data:ro
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Pré-processamento (roda uma única vez): docker compose --profile prep run --rm osrm-prep ...
+  osrm-prep:
+    build: ./osrm
+    profiles: ["prep"]
+    volumes:
+      - osrm_data:/data
+    mem_limit: 3g
+    memswap_limit: 3g
+
+volumes:
+  db_data:
+  osrm_data:

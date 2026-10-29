@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block titulo %}Privacidade{% endblock %}
+{% block classe_page %}{% if not usuario %}no-shell{% endif %}{% endblock %}
+{% block conteudo %}
+<div style="max-width:720px;margin:0 auto">
+  <div class="page-head"><div><h1>Aviso de privacidade</h1><p class="muted">Como o Rotear trata os dados.</p></div></div>
+  <div class="callout ok" style="margin-bottom:16px">{{ icone("escudo") }}
+    <span><strong>Os endereços de entrega não são armazenados.</strong> Eles existem só enquanto a página de planejamento está aberta; ao sair ou recarregar, tudo é descartado.</span>
+  </div>
+  <div class="card card-pad prose">
+    <p>Rotas, nomes de destinatários e status de entrega não são gravados, e nenhum dado de entrega é registrado nos logs do sistema.</p>
+    <h2>O que é armazenado</h2>
+    <ul>
+      <li><strong>Usuários:</strong> nome, e-mail, papel e a senha protegida por hash (argon2). A senha em si nunca é gravada.</li>
+      <li><strong>Configurações</strong> do sistema definidas pelo administrador.</li>
+      <li><strong>Métricas de uso:</strong> data e hora, usuário, quantidade de paradas e motoristas, km e tempo totais, tempo de cálculo. Sem endereços.</li>
+      <li><strong>Cache de localização:</strong> o texto padronizado do endereço e suas coordenadas, sem nome de destinatário, apagado automaticamente após 30 dias. Ele evita consultar o mesmo endereço de novo.</li>
+    </ul>
+    <h2>Serviços externos</h2>
+    <p>Para localizar os endereços, o texto de cada endereço (sem nome de destinatário) é enviado ao serviço de geocodificação configurado.
+      O mapa usa imagens do OpenStreetMap. Os links de rota abrem no Google Maps, sujeito à política de privacidade do Google.</p>
+  </div>
+  {% if not usuario %}<p class="mt-16"><a class="btn" href="/login">{{ icone("voltar") }}Voltar ao login</a></p>{% endif %}
+</div>
+{% endblock %}

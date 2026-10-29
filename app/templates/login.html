@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block titulo %}Entrar{% endblock %}
+{% block shell %}
+<main class="auth">
+  <div class="card auth-card">
+    <a class="brand" href="/"><span class="brand-mark">{{ icone("rota") }}</span>Rotear</a>
+    <p class="tagline">Rotas de entrega planejadas em minutos.</p>
+    {% if erro %}
+    <div class="callout danger" role="alert" style="margin-bottom:16px">{{ icone("alerta") }}<span>{{ erro }}</span></div>
+    {% endif %}
+    <form method="post" action="/login" class="form" id="form-login">
+      <label class="field"><span>E-mail</span>
+        <input type="email" name="email" value="{{ email }}" autocomplete="username" inputmode="email" required {% if not email %}autofocus{% endif %}>
+      </label>
+      <label class="field"><span>Senha</span>
+        <div class="input-group">
+          <input type="password" name="senha" id="senha" autocomplete="current-password" required {% if email %}autofocus{% endif %}>
+          <button class="btn icon-only" type="button" id="ver-senha" aria-label="Mostrar senha" title="Mostrar senha">{{ icone("olho") }}</button>
+        </div>
+      </label>
+      <button class="btn primary block" type="submit"><span class="spin"></span>Entrar</button>
+    </form>
+    <p class="subtle" style="text-align:center;margin-top:18px"><a href="/privacidade">Aviso de privacidade</a></p>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/js/login.js?v=3"></script>{% endblock %}

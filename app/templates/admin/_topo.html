@@ -1,0 +1,8 @@
+<div class="page-head">
+  <div><h1>Administração</h1><p class="muted">Usuários, regras do cálculo e uso do sistema.</p></div>
+</div>
+<nav class="tabs" aria-label="Administração">
+  <a href="/admin/usuarios" {% if aba == "usuarios" %}aria-current="page"{% endif %}>{{ icone("usuarios") }}Usuários</a>
+  <a href="/admin/configuracoes" {% if aba == "configuracoes" %}aria-current="page"{% endif %}>{{ icone("config") }}Configurações</a>
+  <a href="/admin/metricas" {% if aba == "metricas" %}aria-current="page"{% endif %}>{{ icone("grafico") }}Métricas</a>
+</nav>

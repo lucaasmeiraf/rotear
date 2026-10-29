@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block titulo %}Usuários{% endblock %}
+{% block conteudo %}
+{% include "admin/_topo.html" %}
+
+<div class="card">
+  <div class="card-head" style="padding-bottom:14px">
+    <div><h2>Usuários</h2><p class="subtle" id="resumo"></p></div>
+    <button class="btn primary" id="btn-novo">{{ icone("mais") }}<span>Novo usuário</span></button>
+  </div>
+  <ul class="list" id="lista"></ul>
+</div>
+
+<dialog class="sheet" id="dlg-novo" aria-labelledby="t-novo">
+  <div class="sheet-grip"></div>
+  <form id="form-novo">
+    <div class="sheet-head"><h2 id="t-novo">Novo usuário</h2>
+      <button type="button" class="btn ghost icon-only sm" data-fechar aria-label="Fechar">{{ icone("fechar") }}</button></div>
+    <div class="sheet-body form">
+      <label class="field"><span>Nome</span><input type="text" name="nome" required maxlength="120" autocomplete="off"></label>
+      <label class="field"><span>E-mail</span><input type="email" name="email" required inputmode="email" autocomplete="off"></label>
+      <div class="field"><span>Papel</span>
+        <div class="segmented">
+          <label><input type="radio" name="papel" value="operador" checked><span>{{ icone("caminhao", "sm") }}Operador</span></label>
+          <label><input type="radio" name="papel" value="admin"><span>{{ icone("escudo", "sm") }}Administrador</span></label>
+        </div>
+        <small>Operadores planejam rotas. Administradores também gerenciam usuários e configurações.</small>
+      </div>
+      <label class="field"><span>Senha inicial</span>
+        <div class="input-group">
+          <input type="text" name="senha" required minlength="10" autocomplete="new-password" spellcheck="false">
+          <button type="button" class="btn icon-only" data-gerar aria-label="Gerar senha" title="Gerar senha">{{ icone("varinha") }}</button>
+          <button type="button" class="btn icon-only" data-copiar aria-label="Copiar senha" title="Copiar senha">{{ icone("copiar") }}</button>
+        </div>
+        <small>Mínimo de 10 caracteres. Envie a senha à pessoa por um canal seguro.</small>
+      </label>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn" data-fechar>Cancelar</button>
+      <button type="submit" class="btn primary"><span class="spin"></span>Criar usuário</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="dlg-senha" aria-labelledby="t-senha">
+  <div class="sheet-grip"></div>
+  <form id="form-senha">
+    <div class="sheet-head"><h2 id="t-senha">Redefinir senha</h2>
+      <button type="button" class="btn ghost icon-only sm" data-fechar aria-label="Fechar">{{ icone("fechar") }}</button></div>
+    <div class="sheet-body form">
+      <p class="muted" id="senha-quem"></p>
+      <label class="field"><span>Nova senha</span>
+        <div class="input-group">
+          <input type="text" name="senha" required minlength="10" autocomplete="new-password" spellcheck="false">
+          <button type="button" class="btn icon-only" data-gerar aria-label="Gerar senha" title="Gerar senha">{{ icone("varinha") }}</button>
+          <button type="button" class="btn icon-only" data-copiar aria-label="Copiar senha" title="Copiar senha">{{ icone("copiar") }}</button>
+        </div>
+        <small>As sessões abertas desta pessoa serão encerradas.</small>
+      </label>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn" data-fechar>Cancelar</button>
+      <button type="submit" class="btn primary"><span class="spin"></span>Salvar nova senha</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="dlg-status" aria-labelledby="t-status">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head"><h2 id="t-status"></h2>
+    <button type="button" class="btn ghost icon-only sm" data-fechar aria-label="Fechar">{{ icone("fechar") }}</button></div>
+  <div class="sheet-body"><p class="muted" id="status-texto"></p></div>
+  <div class="sheet-foot">
+    <button type="button" class="btn" data-fechar>Cancelar</button>
+    <button type="button" class="btn" id="btn-status-ok"><span class="spin"></span><span></span></button>
+  </div>
+</dialog>
+
+<template id="tpl-linha">
+  <li class="list-row">
+    <span class="avatar" data-inicial></span>
+    <div class="grow">
+      <div class="title" data-nome></div>
+      <div class="meta" data-email></div>
+      <div class="row wrap mt-8" data-badges style="gap:6px"></div>
+    </div>
+    <div class="row-actions">
+      <button class="btn sm icon-only" data-acao="senha" title="Redefinir senha" aria-label="Redefinir senha">{{ icone("chave", "sm") }}</button>
+      <button class="btn sm icon-only" data-acao="status"></button>
+    </div>
+  </li>
+</template>
+<template id="ico-bloquear">{{ icone("bloquear", "sm") }}</template>
+<template id="ico-reativar">{{ icone("reativar", "sm") }}</template>
+
+<script type="application/json" id="dados">{{ dados | tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="/static/js/admin-usuarios.js?v=3"></script>{% endblock %}
