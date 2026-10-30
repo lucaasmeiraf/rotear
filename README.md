@@ -281,12 +281,14 @@ No console do serviço `app`, rode `python -m app.cli criar-admin --email ... --
 ### Roteiro de homologação
 - [ ] `https://SEU_DOMINIO/health` responde `{"status":"ok","db":"ok","osrm":"ok"}`.
 - [ ] O navegador mostra o **cadeado**, e o certificado é válido (clique no cadeado → "Conexão segura").
-- [ ] **No celular**, ao abrir Planejar, o navegador **pergunta** se pode usar a localização, e o mapa mostra o ponto com a precisão em metros.
+- [ ] **No celular**, ao abrir Planejar, o navegador **pergunta** se pode usar a localização, e aparece "Saída: sua localização atual" com a precisão em metros.
 - [ ] Ao negar a localização, aparecem as instruções de como liberar.
 - [ ] O admin cria um operador, e o operador **não** vê nem acessa Administração (tentar `/admin` dá "Acesso negado").
-- [ ] Rodar o planejamento com `exemplos/entregas-exemplo.xlsx` até os links do Google Maps, e abrir um trecho no **aplicativo** Google Maps.
+- [ ] Colar alguns endereços reais (incluindo um difícil, como "Riacho Fundo I, AC 02 Lote 1") e tocar direto em **Calcular rotas**: todas as paradas entram na rota, e o trecho abre no **aplicativo** Google Maps no endereço certo.
+- [ ] **Baixar modelo** baixa a planilha padrão; preenchida e importada, as colunas são reconhecidas sozinhas.
 - [ ] "Enviar no WhatsApp" abre o WhatsApp com o texto e os links prontos.
 - [ ] "Exportar .xlsx" baixa a planilha com as abas Rotas, Resumo e Links.
+- [ ] Na ordem das paradas, os botões **Ligar** e **WhatsApp** do cliente aparecem quando a planilha tem telefone.
 
 ## Regras do app
 
