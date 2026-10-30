@@ -10,6 +10,9 @@ from app.geocodificacao import GeocodificacaoIndisponivel, Resultado, obter_geoc
 from app.models import CacheGeocodificacao
 
 VALIDADE_CACHE = timedelta(days=30)
+# Sobe quando a regra de busca muda: resultados antigos deixam de ser usados (e expiram sozinhos em 30 dias).
+# v2 (2026-10-30): o último recurso passou a aceitar só localidades; antes podia cair num rio ou bloco homônimo.
+VERSAO_BUSCA = "v2"
 
 
 def normalizar(endereco: str) -> str:
@@ -18,6 +21,10 @@ def normalizar(endereco: str) -> str:
     texto = re.sub(r"\s+", " ", texto)
     texto = re.sub(r"\s*,\s*", ", ", texto)
     return texto.strip(" ,;.-")
+
+
+def chave_cache(endereco: str) -> str:
+    return f"{VERSAO_BUSCA}|{normalizar(endereco)}"
 
 
 def do_cache(db: Session, chave: str) -> Resultado | None:
@@ -29,7 +36,7 @@ def do_cache(db: Session, chave: str) -> Resultado | None:
 
 def geocodificar(db: Session, endereco: str, externo_permitido: bool) -> tuple[Resultado, bool]:
     """Retorna (resultado, veio_do_cache). Resultados negativos também vão para o cache."""
-    chave = normalizar(endereco)
+    chave = chave_cache(endereco)
     if (r := do_cache(db, chave)) is not None:
         return r, True
     if not externo_permitido:

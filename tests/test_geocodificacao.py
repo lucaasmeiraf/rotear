@@ -25,6 +25,11 @@ def _linhas(resp):
     return [json.loads(l) for l in resp.text.splitlines() if l.strip()]
 
 
+def test_chave_do_cache_tem_versao_da_busca():
+    from app.geocodificacao.servico import VERSAO_BUSCA, chave_cache
+    assert chave_cache("SQS 308, Asa Sul") == f"{VERSAO_BUSCA}|sqs 308, asa sul"
+
+
 def test_normalizar():
     assert normalizar("  SQS 308  Bloco C ,  Asa Sul. ") == "sqs 308 bloco c, asa sul"
     assert normalizar("Rua Á") == normalizar("rua á")
@@ -174,9 +179,12 @@ def test_variantes_da_consulta():
         ("Brasília", True),
     ]
     assert variantes("Rua A") == [("Rua A", False)]
-    # sem lote/zeros; no último recurso, nomes de região antes de códigos de quadra
+    # sem lote/zeros; no último recurso, só nomes de localidade (nunca "AC 2"), e a RA "I" também sem o numeral
     assert variantes("Riacho fundo I, AC 02 Lote 1") == [
-        ("Riacho fundo I, AC 02 Lote 1", False), ("Riacho fundo I, AC 2", False), ("Riacho fundo I", True), ("AC 2", True)]
+        ("Riacho fundo I, AC 02 Lote 1", False), ("Riacho fundo I, AC 2", False), ("Riacho fundo I", True), ("Riacho fundo", True)]
+    # caso real de 2026-10-30: antes caía no rio Riacho Fundo (Lago Sul) ou num "Bloco A" do Noroeste
+    assert variantes("Riacho Fundo I, Condomínio Via Araguaia, AC 02 LT 1 BL A APT 609, 71810200")[3:] == [
+        ("Riacho Fundo I", True), ("Riacho Fundo", True), ("Condomínio Via Araguaia", True)]
 
 
 def test_limpar_endereco():
@@ -203,11 +211,17 @@ def test_nominatim_tenta_variante_so_quando_nao_encontra():
     assert len(consultas) <= 6 and consultas[-1][1] == "1"  # último recurso só dentro da região
 
 
-def test_nominatim_trecho_sozinho_vira_aproximado():
+def test_nominatim_ultimo_recurso_so_aceita_localidade():
+    vistos = []
+
     def handler(req):
-        if req.url.params["q"] == "Riacho fundo I":
+        vistos.append(req.url.params)
+        if req.url.params["q"] == "Riacho fundo":
             return httpx.Response(200, json=[{"lat": "-15.88", "lon": "-48.01", "place_rank": 30, "display_name": "Riacho Fundo"}])
         return httpx.Response(200, json=[])
 
     r = _nominatim_simulado(handler, intervalo=0).buscar("Riacho fundo I, AC 02 Lote 1")
     assert (r.encontrado, r.precisao) == (True, "baixa")
+    ultimo = vistos[-1]
+    assert ultimo["featureType"] == "settlement" and ultimo["bounded"] == "1"
+    assert "featureType" not in vistos[0]  # a busca normal continua sem filtro

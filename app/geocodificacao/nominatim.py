@@ -58,23 +58,25 @@ def limpar(endereco: str) -> str:
 
 
 def variantes(endereco: str) -> list[tuple[str, bool]]:
-    """Consultas em ordem, como (texto, só_dentro_da_região), até achar algo.
+    """Consultas em ordem, como (texto, só_localidade), até achar algo.
 
     1. O texto original.
     2. O mesmo sem CEP, lote, casa, apto etc., e versões mais curtas: o Nominatim exige que todas as palavras
        existam, então um trecho intermediário faz falhar ("Congresso Nacional, Praça dos Três Poderes, Brasília - DF"
        não acha nada; "Congresso Nacional, Brasília, DF" acha).
-    3. Último recurso: cada trecho sozinho, só dentro da região, para achar ao menos o bairro ou a cidade. Nomes sem
-       número vêm primeiro ("Lago Sul", "Riacho Fundo I"), porque códigos como "AC 2" se repetem em várias cidades.
+    3. Último recurso: cada trecho sem números sozinho, aceitando só localidades (cidade, RA, bairro) dentro da
+       região. Sem esse filtro, "Riacho Fundo I" caía no rio Riacho Fundo (Lago Sul), e "AC 2 BL A" num bloco do
+       Noroeste. Trechos com número (quadra, bloco) se repetem em várias cidades e nunca são buscados sozinhos.
+       No OpenStreetMap, várias RAs "I" não têm o numeral ("Riacho Fundo"), então tenta também sem ele.
     """
     lista: list[tuple[str, bool]] = []
     vistas: set[str] = set()
 
-    def incluir(consulta: str, restrita: bool = False) -> None:
+    def incluir(consulta: str, so_localidade: bool = False) -> None:
         chave = ", ".join(_partes(consulta)).casefold()
         if chave and chave not in vistas:
             vistas.add(chave)
-            lista.append((consulta, restrita))
+            lista.append((consulta, so_localidade))
 
     incluir(endereco)
     limpo = limpar(endereco)
@@ -84,9 +86,12 @@ def variantes(endereco: str) -> list[tuple[str, bool]]:
         incluir(", ".join([partes[0], *partes[-2:]]))  # local, cidade, UF
     if len(partes) >= 2:
         incluir(", ".join([partes[0], partes[-1]]))  # local, UF
-    trechos = [p for p in partes if len(p) > 2]  # "DF" sozinho não ajuda
-    for parte in sorted(trechos, key=lambda p: any(c.isdigit() for c in p)):
-        incluir(parte, restrita=True)
+    for parte in partes:
+        if len(parte) <= 2 or any(c.isdigit() for c in parte):  # "DF" sozinho e códigos de quadra não ajudam
+            continue
+        incluir(parte, so_localidade=True)
+        if parte.endswith(" I"):
+            incluir(parte[:-2], so_localidade=True)
     return lista[:MAX_TENTATIVAS]
 
 
@@ -111,13 +116,13 @@ class Nominatim:
 
     def buscar(self, endereco: str) -> Resultado:
         """Tenta a consulta original e, só se nada for encontrado, as variantes mais curtas (cada uma respeita o limitador)."""
-        for consulta, restrita in variantes(endereco):
-            resultado = self._consultar(consulta, restrita)
+        for consulta, so_localidade in variantes(endereco):
+            resultado = self._consultar(consulta, so_localidade)
             if resultado.encontrado:
                 return resultado
         return Resultado(encontrado=False)
 
-    def _consultar(self, endereco: str, restrita: bool = False) -> Resultado:
+    def _consultar(self, endereco: str, so_localidade: bool = False) -> Resultado:
         minlon, minlat, maxlon, maxlat = REGIAO_BBOX
         params = {
             "q": endereco,
@@ -125,10 +130,12 @@ class Nominatim:
             "countrycodes": "br",
             "limit": 1,
             "viewbox": f"{minlon},{maxlat},{maxlon},{minlat}",  # prioriza a região, sem excluir o resto
-            "bounded": 1 if restrita else 0,
+            "bounded": 1 if so_localidade else 0,
             "accept-language": "pt-BR",
             "email": self.email,
         }
+        if so_localidade:
+            params["featureType"] = "settlement"  # cidade, RA ou bairro; nunca rio, prédio ou bloco
         self.limitador.aguardar()
         try:
             resp = self.cliente.get(f"{self.url}/search", params=params)
@@ -144,7 +151,7 @@ class Nominatim:
         r = dados[0]
         lat, lng = float(r["lat"]), float(r["lon"])
         precisao, nivel = nivel_por_rank(int(r.get("place_rank", 0)))
-        if restrita:  # achou só um pedaço do endereço
+        if so_localidade:  # achou só a região do endereço
             precisao = "baixa"
         if not dentro_da_regiao(lat, lng):
             precisao, nivel = "baixa", "fora_da_area"

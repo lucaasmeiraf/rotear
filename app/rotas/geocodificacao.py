@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal, get_db
 from app.deps import exigir_login
 from app.geocodificacao import GeocodificacaoIndisponivel
-from app.geocodificacao.servico import do_cache, geocodificar, normalizar
+from app.geocodificacao.servico import chave_cache, do_cache, geocodificar
 from app.models import Usuario
 from app.rotas.admin import obter_configuracao
 
@@ -65,7 +65,7 @@ def geocodificar_lote(dados: VariosEnderecos, _: Usuario = Depends(exigir_login)
     pendentes = []
     acertos = []
     for i, endereco in enumerate(dados.enderecos):
-        r = do_cache(db, normalizar(endereco))
+        r = do_cache(db, chave_cache(endereco))
         if r is None:
             pendentes.append((i, endereco))
         else:
