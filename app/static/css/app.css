@@ -375,20 +375,6 @@ table.data .num { text-align: right; }
 .page.planejar { padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 110px); }
 @media (min-width: 860px) { .page.planejar { padding-bottom: 48px; } }
 
-.stepper { list-style: none; margin: 0 0 18px; padding: 0; display: flex; align-items: center; }
-.stepper li { flex: 1; display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: .85rem; font-weight: 650; }
-.stepper li:not(:last-child)::after { content: ""; flex: 1; height: 2px; border-radius: 2px; background: var(--line); margin: 0 6px; }
-.stepper .dot { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: .82rem; font-weight: 800;
-  background: var(--surface); border: 2px solid var(--line-strong); color: var(--ink-3); transition: all .2s var(--ease); }
-.stepper .nome { display: none; }
-.stepper li.feito { color: var(--ink-2); }
-.stepper li.feito .dot { background: var(--brand-soft); border-color: transparent; color: var(--brand-strong); }
-.stepper li.feito:not(:last-child)::after { background: color-mix(in srgb, var(--brand) 45%, transparent); }
-.stepper li.atual { color: var(--ink); }
-.stepper li.atual .dot { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); box-shadow: 0 0 0 4px var(--brand-soft); }
-.stepper li.atual .nome { display: inline; }
-@media (min-width: 640px) { .stepper .nome { display: inline; } }
-
 .passo { display: none; animation: aparecer .25s var(--ease); }
 .passo.ativo { display: block; }
 @keyframes aparecer { from { opacity: 0; transform: translateY(6px); } }
@@ -410,6 +396,11 @@ table.data .num { text-align: right; }
   border-radius: var(--radius-lg); background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s; }
 .dropzone:hover, .dropzone.arrastando { border-color: var(--brand); background: var(--brand-soft); }
 .dropzone .bubble { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+.modelo-dica { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.modelo-dica .grow { flex: 1; min-width: 200px; }
+.modelo-dica .subtle { display: block; font-size: .88rem; }
+.modelo-dica .btn { flex-shrink: 0; }
 .previa { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .previa ol { margin: 6px 0 0; padding-left: 20px; font-size: .92rem; color: var(--ink-2); }
 .previa li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -419,20 +410,21 @@ table.data .num { text-align: right; }
 .paradas { max-height: 420px; overflow: auto; }
 .lista-vazia { padding: 18px; color: var(--ink-3); font-size: .93rem; }
 
-.barra-progresso { height: 10px; border-radius: 10px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--line); }
-.barra-progresso span { display: block; height: 100%; width: 0; border-radius: 10px; background: linear-gradient(90deg, var(--brand), #7b5cff); transition: width .35s var(--ease); }
-
-.conferir { display: grid; gap: 16px; }
-@media (min-width: 960px) { .conferir { grid-template-columns: 1.4fr 1fr; align-items: start; } .conferir .map.tall { position: sticky; top: calc(var(--topbar-h) + 16px); } }
-#lista-atencao { max-height: 560px; overflow: auto; }
-.item-atencao { display: grid; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); }
-.item-atencao:first-child { border-top: 0; }
-.item-atencao.focado { background: var(--brand-soft); }
-.item-atencao .acoes { display: flex; gap: 6px; flex-wrap: wrap; }
-.item-atencao .desc { font-size: .84rem; color: var(--ink-3); }
 .legenda { display: flex; flex-wrap: wrap; gap: 14px; font-size: .84rem; color: var(--ink-2); }
 .legenda i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line-strong); }
-.legenda .ok { background: #1baf7a; } .legenda .atencao { background: #eda100; } .legenda .manual { background: #3056f5; }
+.legenda .exata { background: var(--ink-2); } .legenda .aprox { background: #fff; border: 2px dashed var(--ink-2); box-shadow: none; }
+
+/* Tela de endereços: partida em uma linha, status da localização e opções recolhidas */
+.partida-linha { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink-2); }
+.partida-linha .icon { color: var(--brand); flex: none; }
+.partida-card #gps-acoes:empty { display: none; }
+.geo-status { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: .85rem; color: var(--brand-strong); }
+.spin-mini { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--brand-soft); border-top-color: var(--brand);
+  animation: girar .8s linear infinite; flex: none; }
+details.mais-opcoes summary { cursor: pointer; color: var(--ink-2); font-weight: 650; font-size: .92rem; }
+.pino.aprox span { background: #fff; border: 2.5px dashed var(--cor); }
+.tag-posicao { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: .72rem; font-weight: 650; vertical-align: 1px;
+  background: var(--surface-2); color: var(--ink-3); border: 1px solid var(--line); }
 
 .contador { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
 .contador output { min-width: 44px; text-align: center; font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -472,6 +464,10 @@ details.ordem ol { margin: 0; padding: 0 18px 14px 44px; font-size: .9rem; }
 details.ordem li { padding: 5px 0; border-bottom: 1px dashed var(--line); }
 details.ordem li:last-child { border-bottom: 0; }
 details.ordem li small { display: block; color: var(--ink-3); }
+details.ordem li small.obs { color: var(--ink-2); font-style: italic; }
+details.ordem .contato { display: flex; gap: 8px; margin: 6px 0 2px; }
+details.ordem .contato .btn { min-height: 36px; }
+details.ordem .contato .whats { background: #25d366; color: #06301a; border-color: transparent; }
 
 /* Pinos e linhas */
 .pino.partida span { background: var(--ink); }

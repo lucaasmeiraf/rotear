@@ -1,8 +1,9 @@
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from app.entrada import ArquivoInvalido, ler_planilha, sugerir_mapeamento
 from tests.conftest import login
@@ -23,6 +24,23 @@ def test_sugestao_de_colunas():
     assert s["cidade"] == 5 and s["uf"] == 6 and s["cep"] == 7 and s["volumes"] == 8
     assert s["referencia"] is None  # "Nome do Cliente" não é igual a nenhum sinônimo
     assert sugerir_mapeamento(["Cliente", "Rua"])["referencia"] == 0
+    s = sugerir_mapeamento(["Cliente", "Celular", "Pedido", "Obs."])
+    assert (s["referencia"], s["telefone"], s["pedido"], s["observacoes"]) == (0, 1, 2, 3)
+
+
+def test_modelo_padrao_reconhecido():
+    """O modelo que a operação baixa precisa ser lido sem ajuste manual de colunas."""
+    caminho = Path(__file__).parent.parent / "app" / "static" / "modelos" / "modelo-entregas.xlsx"
+    wb = load_workbook(caminho)
+    assert wb.sheetnames[0] == "Entregas"
+    wb["Entregas"].append(["Maria", "(61) 99999-0000", "m@x.com", "Riacho Fundo I, AC 02 Lote 1", "1001", 2, "Portaria"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = ler_planilha("modelo.xlsx", buf.getvalue())
+    s = {k: (r["colunas"][v] if v is not None else None) for k, v in r["sugestao"].items()}
+    assert s == {"endereco": "Endereço completo *", "numero": None, "complemento": None, "bairro": None,
+                 "cidade": None, "uf": None, "cep": None, "referencia": "Cliente", "volumes": "Volumes",
+                 "telefone": "Telefone", "pedido": "Pedido", "observacoes": "Observações"}
 
 
 def test_csv_ponto_e_virgula_e_latin1():

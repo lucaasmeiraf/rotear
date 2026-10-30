@@ -1,4 +1,6 @@
-// Assistente de planejamento. Tudo fica só na memória desta página: nada é salvo.
+// Planejamento em 2 telas (endereços -> rotas). Tudo fica só na memória desta página: nada é salvo.
+// Os endereços são localizados em segundo plano e nunca bloqueiam o cálculo: exato = pino cheio, aproximado =
+// pino vazado, não localizado = entra no fim da rota e o Google Maps acha pelo texto.
 (function () {
   "use strict";
   const { api, toast, carregando, copiar, fmt } = window.Rotear;
@@ -8,13 +10,14 @@
   // Do 9º motorista em diante a cor se repete com traço tracejado (codificação composta).
   const CORES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
   const TINTA_SOBRE = { "#eda100": "#0b0b0b" }; // texto escuro sobre o amarelo
-  const COR_OK = "#1baf7a", COR_ATENCAO = "#eda100", COR_MANUAL = "#3056f5", COR_PARTIDA = "#0e1726";
-  const NIVEL_TEXTO = { rua: "Só a rua foi encontrada", bairro: "Só o bairro foi encontrado", cidade: "Só a cidade foi encontrada",
-    fora_da_area: "Fora da área atendida (DF e entorno)" };
+  const COR_PARTIDA = "#0e1726";
   const CAMPOS = [
     ["endereco", "Endereço", true], ["numero", "Número"], ["complemento", "Complemento"], ["bairro", "Bairro"],
-    ["cidade", "Cidade"], ["uf", "UF"], ["cep", "CEP"], ["referencia", "Nome / referência"], ["volumes", "Volumes"],
+    ["cidade", "Cidade"], ["uf", "UF"], ["cep", "CEP"], ["referencia", "Cliente / referência"], ["telefone", "Telefone"], ["pedido", "Pedido"],
+    ["volumes", "Volumes"], ["observacoes", "Observações"],
   ];
+  // Dados de contato que acompanham a parada (nunca entram no texto enviado à geocodificação)
+  const EXTRAS = ["complementos", "telefones", "pedidos", "observacoes"];
 
   const $ = (id) => document.getElementById(id);
   const icone = (nome) => $("tpl-ico-" + nome).content.cloneNode(true);
@@ -25,61 +28,35 @@
     passo: 1,
     config: null,
     partida: null, // {lat, lng, precisao_m, endereco}
-    paradas: [], // {id, texto, exibicao, referencias[], volumes, linhas, geo, status}
+    paradas: [], // {id, texto, referencias[], complementos[], telefones[], pedidos[], observacoes[], volumes, linhas, geo}
     planilha: null,
     motoristas: [{ nome: "" }],
     resultado: null,
   };
   let proximoId = 1;
 
-  // ---------------------------------------------------------------- navegação
-  const btnVoltar = $("btn-voltar"), btnAvancar = $("btn-avancar"), txtAvancar = $("btn-avancar-texto");
+  // ---------------------------------------------------------------- navegação (1 = endereços, 2 = rotas)
+  const btnAvancar = $("btn-avancar"), txtAvancar = $("btn-avancar-texto");
 
   function irPara(passo) {
-    if (passo === 3 && estado.passo !== 3) iniciarGeocodificacao();
     estado.passo = passo;
     document.querySelectorAll(".passo").forEach((s) => s.classList.toggle("ativo", Number(s.dataset.passo) === passo));
-    document.querySelectorAll("#stepper li").forEach((li) => {
-      const n = Number(li.dataset.passo);
-      li.classList.toggle("atual", n === passo);
-      li.classList.toggle("feito", n < passo);
-    });
     window.scrollTo({ top: 0, behavior: "smooth" });
-    requestAnimationFrame(() => {
-      if (passo === 1 && mapaPartida) mapaPartida.invalidateSize();
-      if (passo === 3 && mapaConferir) { mapaConferir.invalidateSize(); enquadrarConferir(); }
-      if (passo === 4) renderMotoristas();
-      if (passo === 5 && mapaResultado) mapaResultado.invalidateSize();
-    });
+    requestAnimationFrame(() => { if (passo === 2 && mapaResultado) mapaResultado.invalidateSize(); });
     atualizarAcoes();
   }
 
   function atualizarAcoes() {
     const p = estado.passo;
-    btnVoltar.classList.toggle("hidden", p === 1 || p === 5);
-    btnAvancar.classList.toggle("hidden", p === 5);
-    $("acoes").classList.toggle("hidden", p === 5);
-    let pode = true, texto = "Continuar";
-    if (p === 1) pode = !!estado.partida;
-    if (p === 2) { pode = estado.paradas.length > 0; texto = "Localizar endereços"; }
-    if (p === 3) {
-      const pend = pendencias();
-      pode = !geoRodando && estado.paradas.length > 0 && pend.length === 0 && estado.paradas.every((x) => x.geo);
-      texto = pend.length ? `Resolva ${pend.length} pendência${pend.length > 1 ? "s" : ""}` : "Continuar";
-    }
-    if (p === 4) texto = "Calcular rotas";
-    btnAvancar.disabled = !pode;
+    $("acoes").classList.toggle("hidden", p === 2);
+    const temTexto = !!$("texto-colado").value.trim();
+    let texto = "Calcular rotas";
+    if (!estado.partida) texto = estado.config && estado.config.modo_partida === "endereco_fixo" ? "Partida não configurada" : "Aguardando localização";
+    btnAvancar.disabled = !estado.partida || (!estado.paradas.length && !temTexto);
     txtAvancar.textContent = texto;
   }
 
-  btnVoltar.addEventListener("click", () => {
-    if (estado.passo === 3) cancelarGeocodificacao();
-    irPara(Math.max(1, estado.passo - 1));
-  });
-  btnAvancar.addEventListener("click", () => {
-    if (estado.passo === 4) return calcular();
-    irPara(estado.passo + 1);
-  });
+  btnAvancar.addEventListener("click", () => calcular());
 
   // Aviso ao sair: o planejamento não é salvo
   window.addEventListener("beforeunload", (ev) => {
@@ -87,25 +64,6 @@
   });
 
   // ---------------------------------------------------------------- 1. partida
-  let mapaPartida = null, marcadorPartida = null, circuloPartida = null;
-
-  function mostrarPartidaNoMapa(lat, lng, precisao) {
-    $("mapa-partida").classList.remove("hidden");
-    if (!mapaPartida) mapaPartida = criarMapa("mapa-partida");
-    mapaPartida.invalidateSize();
-    const ll = [lat, lng];
-    if (!marcadorPartida) {
-      marcadorPartida = L.marker(ll, { icon: pino(COR_PARTIDA, "", { tamanho: 26 }), keyboard: false }).addTo(mapaPartida);
-    } else marcadorPartida.setLatLng(ll);
-    if (precisao) {
-      if (!circuloPartida) circuloPartida = L.circle(ll, { radius: precisao, color: COR_MANUAL, weight: 1.5, fillOpacity: 0.12 }).addTo(mapaPartida);
-      else circuloPartida.setLatLng(ll).setRadius(precisao);
-      mapaPartida.fitBounds(circuloPartida.getBounds(), { maxZoom: 17, padding: [24, 24] });
-    } else {
-      mapaPartida.setView(ll, 16);
-    }
-  }
-
   let dicaTimer = null;
 
   function pedirLocalizacao() {
@@ -140,13 +98,13 @@
       estado.partida = { lat: latitude, lng: longitude, precisao_m: accuracy };
       const m = Math.round(accuracy);
       const badge = $("gps-precisao");
-      badge.textContent = `Precisão: ± ${fmt.num(m)} m`;
+      badge.textContent = `± ${fmt.num(m)} m`;
       badge.className = "badge " + (m <= 50 ? "ok" : m <= 200 ? "warn" : "danger");
-      $("gps-status").textContent = m <= 50
-        ? "Localização obtida. Confira o ponto no mapa."
-        : "Localização obtida, mas com pouca precisão. Se puder, ative o GPS ou vá para um local aberto e toque em Atualizar.";
-      btn.querySelector("span:last-child").textContent = "Atualizar localização";
-      mostrarPartidaNoMapa(latitude, longitude, accuracy);
+      $("gps-status").textContent = m <= 200
+        ? "Saída: sua localização atual."
+        : "Saída: sua localização atual, com pouca precisão. Se puder, ligue o GPS e toque em Atualizar.";
+      btn.querySelector("span:last-child").textContent = "Atualizar";
+      btn.classList.add("ghost");
       atualizarAcoes();
     }, (erro) => {
       clearTimeout(dicaTimer); $("gps-dica").classList.add("hidden");
@@ -154,7 +112,7 @@
       estado.partida = null;
       atualizarAcoes();
       if (erro.code === erro.PERMISSION_DENIED) {
-        $("gps-status").textContent = "Precisamos da sua localização para calcular as rotas.";
+        $("gps-status").textContent = "Saída: precisamos da sua localização para calcular as rotas.";
         $("gps-negado").classList.remove("hidden");
         btn.querySelector("span:last-child").textContent = "Tentar novamente";
       } else {
@@ -183,18 +141,23 @@
         existente.linhas += 1;
         if (it.referencia) existente.referencias.push(it.referencia);
         if (it.volumes) existente.volumes = (existente.volumes || 0) + it.volumes;
-        if (it.complemento && !existente.complementos.includes(it.complemento)) existente.complementos.push(it.complemento);
+        for (const k of EXTRAS) {
+          const v = it[k];
+          if (v && !existente[k].includes(v)) existente[k].push(v);
+        }
         agrupadas++;
         continue;
       }
       if (estado.paradas.length >= limite) { cortadas++; continue; }
       const p = { id: proximoId++, texto: texto.slice(0, 300), referencias: it.referencia ? [it.referencia] : [],
-        complementos: it.complemento ? [it.complemento] : [], volumes: it.volumes || null, linhas: 1, geo: null, status: "pendente" };
+        volumes: it.volumes || null, linhas: 1, geo: null };
+      for (const k of EXTRAS) p[k] = it[k] ? [it[k]] : [];
       estado.paradas.push(p);
       porChave.set(k, p);
       novas++;
     }
     renderParadas();
+    localizarPendentes();
     const partes = [];
     if (novas) partes.push(`${novas} parada${novas > 1 ? "s" : ""} adicionada${novas > 1 ? "s" : ""}`);
     if (agrupadas) partes.push(`${agrupadas} repetida${agrupadas > 1 ? "s" : ""} agrupada${agrupadas > 1 ? "s" : ""}`);
@@ -209,7 +172,7 @@
     const n = estado.paradas.length;
     const linhas = estado.paradas.reduce((s, p) => s + p.linhas, 0);
     $("resumo-paradas").textContent = n
-      ? `${n} parada${n > 1 ? "s" : ""}${linhas > n ? ` (${linhas} linhas, repetidas agrupadas)` : ""} · limite ${estado.config.max_paradas}`
+      ? `${n} parada${n > 1 ? "s" : ""}${linhas > n ? ` (${linhas} linhas, repetidas agrupadas)` : ""}`
       : "Nenhum endereço ainda.";
     $("btn-limpar").classList.toggle("hidden", !n);
     if (!n) {
@@ -227,6 +190,7 @@
       const meta = [];
       if (p.complementos.length) meta.push(p.complementos.join(" · "));
       if (p.referencias.length) meta.push(p.referencias.join(", "));
+      if (p.pedidos.length) meta.push("Pedido " + p.pedidos.join(", "));
       if (p.volumes) meta.push(`${p.volumes} vol.`);
       if (p.linhas > 1) meta.push(`${p.linhas} linhas`);
       box.append(t);
@@ -243,11 +207,10 @@
 
   function removerParada(id) {
     estado.paradas = estado.paradas.filter((p) => p.id !== id);
-    if (marcadores.has(id)) { marcadores.get(id).remove(); marcadores.delete(id); }
   }
 
   $("btn-limpar").addEventListener("click", () => {
-    estado.paradas.forEach((p) => removerParada(p.id));
+    estado.paradas = [];
     renderParadas();
   });
 
@@ -256,11 +219,15 @@
   }));
 
   // Colar e digitar
-  $("btn-usar-colado").addEventListener("click", () => {
+  function usarColado() {
     const linhas = $("texto-colado").value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!linhas.length) return;
     adicionar(linhas.map((texto) => ({ texto })));
-    if (linhas.length) $("texto-colado").value = "";
-  });
+    $("texto-colado").value = "";
+    atualizarAcoes();
+  }
+  $("btn-usar-colado").addEventListener("click", usarColado);
+  $("texto-colado").addEventListener("input", atualizarAcoes);
   $("form-manual").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const campo = $("texto-manual");
@@ -317,7 +284,7 @@
 
   function renderMapeamento() {
     const pl = estado.planilha;
-    dropzone.classList.add("hidden");
+    dropzone.classList.add("hidden"); $("modelo-dica").classList.add("hidden");
     $("mapeamento").classList.remove("hidden");
     $("map-arquivo").textContent = pl.nome;
     $("map-linhas").textContent = `${fmt.num(pl.linhas.length)} linha(s) de dados · ${pl.colunas.length} coluna(s)`;
@@ -356,264 +323,93 @@
       const vol = parseInt(valorCampo(l, mapa, "volumes").replace(/\D/g, ""), 10);
       return {
         texto: montarTexto(l, mapa),
-        complemento: valorCampo(l, mapa, "complemento"),
+        complementos: valorCampo(l, mapa, "complemento"),
         referencia: valorCampo(l, mapa, "referencia"),
+        telefones: valorCampo(l, mapa, "telefone"),
+        pedidos: valorCampo(l, mapa, "pedido"),
+        observacoes: valorCampo(l, mapa, "observacoes"),
         volumes: Number.isFinite(vol) ? vol : null,
       };
     });
     adicionar(itens);
     estado.planilha = null;
     $("mapeamento").classList.add("hidden");
-    dropzone.classList.remove("hidden");
+    dropzone.classList.remove("hidden"); $("modelo-dica").classList.remove("hidden");
   });
 
-  // ---------------------------------------------------------------- 3. conferir
-  let mapaConferir = null, geoRodando = false, controle = null;
-  const marcadores = new Map();
-  let modoMarcar = null; // id da parada aguardando um toque no mapa
+  // ---------------------------------------------------------------- localização em segundo plano
+  // Começa assim que há endereços novos; o cálculo só espera o que ainda faltar. Nada aqui pede ação da operadora.
+  let geoRodada = null, controle = null;
+  const geoProgresso = { feitos: 0, total: 0, externos: 0 };
+  const temPosicao = (p) => !!(p.geo && p.geo.encontrado && p.geo.nivel !== "fora_da_area");
+  const exata = (p) => temPosicao(p) && p.geo.precisao === "alta";
 
-  const precisaAtencao = (p) => p.status === "erro" || p.status === "atencao";
-  const pendencias = () => estado.paradas.filter(precisaAtencao);
-
-  function aplicarGeo(p, geo) {
-    p.geo = geo;
-    p.status = !geo.encontrado ? "erro" : geo.precisao === "alta" ? "ok" : "atencao";
-  }
-
-  function cancelarGeocodificacao() {
-    if (controle) controle.abort();
-    controle = null;
-    geoRodando = false;
-  }
-
-  async function iniciarGeocodificacao() {
-    $("geo-falha").classList.add("hidden");
-    const faltando = estado.paradas.filter((p) => !p.geo);
-    if (!faltando.length) { mostrarConferir(); return; }
-    geoRodando = true;
-    atualizarAcoes();
-    $("geo-progresso").classList.remove("hidden");
-    $("conferir").classList.add("hidden");
-    const total = faltando.length;
-    let feitos = 0, pendentesExternos = 0, externosFeitos = 0;
-    const progresso = () => {
-      $("geo-conta").textContent = `${feitos} de ${total}`;
-      $("geo-barra").style.width = `${(feitos / total) * 100}%`;
-      const restantes = pendentesExternos - externosFeitos;
-      $("geo-eta").textContent = restantes > 0
-        ? `Cerca de ${fmt.duracao(restantes * 1.1 + 30).replace(/^0 min$/, "1 min")} restantes · o serviço de mapas permite 1 consulta por segundo.`
-        : "Quase pronto…";
-    };
-    $("geo-titulo").textContent = "Localizando endereços…";
-    progresso();
-    controle = new AbortController();
-    try {
-      const resp = await fetch("/api/geocodificar", {
-        method: "POST", credentials: "same-origin", signal: controle.signal,
-        headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
-        body: JSON.stringify({ enderecos: faltando.map((p) => p.texto) }),
-      });
-      if (resp.status === 401) { window.location.href = "/login"; return; }
-      if (!resp.ok) {
-        const d = await resp.json().catch(() => ({}));
-        throw new Error(typeof d.detail === "string" ? d.detail : "Não foi possível localizar os endereços.");
-      }
-      const leitor = resp.body.getReader();
-      const dec = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { value, done } = await leitor.read();
-        if (done) break;
-        buffer += dec.decode(value, { stream: true });
-        let nl;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          const linha = buffer.slice(0, nl).trim();
-          buffer = buffer.slice(nl + 1);
-          if (!linha) continue;
-          const ev = JSON.parse(linha);
-          if (ev.tipo === "inicio") pendentesExternos = ev.pendentes;
-          else if (ev.tipo === "resultado") {
-            const p = faltando[ev.indice];
-            if (p) aplicarGeo(p, ev);
-            feitos++;
-            if (!ev.de_cache) externosFeitos++;
-            progresso();
-          } else if (ev.tipo === "erro") throw new Error(ev.mensagem);
+  function localizarPendentes() {
+    if (geoRodada || !estado.config.geocodificacao_ativa) return geoRodada || Promise.resolve();
+    geoRodada = (async () => {
+      try {
+        for (;;) {
+          const faltando = estado.paradas.filter((p) => !p.geo);
+          if (!faltando.length) break;
+          if (!(await localizarLote(faltando))) break; // sem progresso: não insiste
         }
+      } catch (e) {
+        if (e.name !== "AbortError") console.warn("Localização interrompida:", e.message);
+      } finally {
+        geoRodada = null; controle = null;
+        renderGeoStatus();
       }
-      geoRodando = false;
-      mostrarConferir();
-    } catch (e) {
-      geoRodando = false;
-      if (e.name === "AbortError") return;
-      $("geo-falha-texto").textContent = e.message + (feitos ? ` (${feitos} de ${total} já foram localizados e ficam guardados.)` : "");
-      $("geo-falha").classList.remove("hidden");
-      $("geo-progresso").classList.add("hidden");
-      if (feitos) mostrarConferir(true);
-    } finally {
-      controle = null;
-      atualizarAcoes();
-    }
-  }
-  $("btn-geo-repetir").addEventListener("click", iniciarGeocodificacao);
-
-  function corParada(p) {
-    return p.status === "manual" ? COR_MANUAL : p.status === "ok" ? COR_OK : COR_ATENCAO;
+    })();
+    return geoRodada;
   }
 
-  function mostrarConferir(parcial) {
-    if (!parcial) $("geo-progresso").classList.add("hidden");
-    $("conferir").classList.remove("hidden");
-    if (!mapaConferir) {
-      mapaConferir = criarMapa("mapa-conferir");
-      mapaConferir.on("click", (ev) => {
-        if (!modoMarcar) return;
-        const p = estado.paradas.find((x) => x.id === modoMarcar);
-        modoMarcar = null;
-        $("mapa-conferir").style.cursor = "";
-        if (!p) return;
-        p.geo = { ...(p.geo || {}), encontrado: true, lat: ev.latlng.lat, lng: ev.latlng.lng, precisao: "manual" };
-        p.status = "manual";
-        desenharMarcadores();
-        renderAtencao();
-        toast("Ponto marcado.");
-      });
-    }
-    mapaConferir.invalidateSize();
-    desenharMarcadores();
-    renderAtencao();
-    enquadrarConferir();
-    atualizarAcoes();
-  }
-
-  function desenharMarcadores() {
-    const vivos = new Set();
-    estado.paradas.forEach((p, i) => {
-      if (!p.geo || !p.geo.encontrado) return;
-      vivos.add(p.id);
-      const icon = pino(corParada(p), i + 1, { tamanho: 28 });
-      let m = marcadores.get(p.id);
-      if (!m) {
-        m = L.marker([p.geo.lat, p.geo.lng], { icon, draggable: true, autoPan: true }).addTo(mapaConferir);
-        m.on("dragend", () => {
-          const ll = m.getLatLng();
-          p.geo = { ...p.geo, lat: ll.lat, lng: ll.lng, precisao: "manual" };
-          p.status = "manual";
-          desenharMarcadores();
-          renderAtencao();
-        });
-        m.on("click", () => focarItem(p.id));
-        marcadores.set(p.id, m);
-      } else {
-        m.setLatLng([p.geo.lat, p.geo.lng]).setIcon(icon);
-      }
-      m.bindTooltip(p.texto, { className: "rotulo", direction: "top", offset: [0, -14] });
+  async function localizarLote(faltando) {
+    Object.assign(geoProgresso, { feitos: 0, total: faltando.length, externos: 0 });
+    renderGeoStatus();
+    controle = new AbortController();
+    const resp = await fetch("/api/geocodificar", {
+      method: "POST", credentials: "same-origin", signal: controle.signal,
+      headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
+      body: JSON.stringify({ enderecos: faltando.map((p) => p.texto) }),
     });
-    for (const [id, m] of marcadores) if (!vivos.has(id)) { m.remove(); marcadores.delete(id); }
-  }
-
-  function enquadrarConferir() {
-    if (!mapaConferir) return;
-    const pts = estado.paradas.filter((p) => p.geo && p.geo.encontrado).map((p) => [p.geo.lat, p.geo.lng]);
-    if (estado.partida) pts.push([estado.partida.lat, estado.partida.lng]);
-    if (pts.length) mapaConferir.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
-  }
-
-  function focarItem(id) {
-    const el = document.querySelector(`[data-parada="${id}"]`);
-    if (!el) return;
-    document.querySelectorAll(".item-atencao.focado").forEach((x) => x.classList.remove("focado"));
-    el.classList.add("focado");
-    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  function botao(texto, ico, classe, fn) {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "btn sm " + (classe || "");
-    if (ico) b.append(icone(ico));
-    const s = document.createElement("span"); s.textContent = texto; b.append(s);
-    b.addEventListener("click", fn);
-    return b;
-  }
-
-  function renderAtencao() {
-    const pend = pendencias();
-    const ul = $("lista-atencao");
-    ul.replaceChildren();
-    const total = estado.paradas.length;
-    const ok = total - pend.length;
-    $("atencao-titulo").textContent = pend.length ? `${pend.length} endereço${pend.length > 1 ? "s precisam" : " precisa"} de atenção` : "Tudo certo!";
-    $("atencao-sub").textContent = pend.length
-      ? `${ok} de ${total} localizados. Corrija o texto, ajuste o pino no mapa ou confirme.`
-      : `${total} parada${total > 1 ? "s" : ""} no mapa. Se quiser, arraste qualquer pino para ajustar.`;
-    if (!pend.length) {
-      const li = document.createElement("li"); li.className = "lista-vazia";
-      li.textContent = "Nenhuma pendência. Continue para escolher os motoristas.";
-      ul.append(li);
-    }
-    for (const p of pend) {
-      const li = document.createElement("li");
-      li.className = "item-atencao";
-      li.dataset.parada = p.id;
-      const topo = document.createElement("div"); topo.className = "row between";
-      const b = document.createElement("span");
-      b.className = "badge " + (p.status === "erro" ? "danger" : "warn");
-      b.textContent = p.status === "erro" ? "Não encontrado" : (NIVEL_TEXTO[p.geo.nivel] || "Localização aproximada");
-      const num = document.createElement("span"); num.className = "subtle"; num.textContent = `Parada ${estado.paradas.indexOf(p) + 1}`;
-      topo.append(b, num);
-
-      const form = document.createElement("form"); form.className = "input-group";
-      const inp = document.createElement("input"); inp.type = "text"; inp.value = p.texto; inp.maxLength = 300; inp.setAttribute("aria-label", "Endereço");
-      const buscar = document.createElement("button"); buscar.type = "submit"; buscar.className = "btn icon-only"; buscar.title = "Buscar de novo";
-      buscar.setAttribute("aria-label", "Buscar de novo"); buscar.innerHTML = '<span class="spin"></span>'; buscar.append(icone("localizar"));
-      form.append(inp, buscar);
-      form.addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        const texto = inp.value.replace(/\s+/g, " ").trim();
-        if (!texto) return;
-        carregando(buscar, async () => {
-          try {
-            const r = await api("POST", "/api/geocodificar/um", { endereco: texto });
-            p.texto = texto;
-            aplicarGeo(p, r);
-            desenharMarcadores();
-            renderAtencao();
-            if (p.status === "ok") toast("Endereço localizado.");
-            else if (p.status === "erro") toast("Ainda não encontrado. Tente outro texto ou marque no mapa.", "erro");
-            else if (marcadores.has(p.id)) mapaConferir.setView(marcadores.get(p.id).getLatLng(), 16);
-          } catch (e) { toast(e.message, "erro"); }
-        });
-      });
-
-      const acoes = document.createElement("div"); acoes.className = "acoes";
-      if (p.status === "atencao") {
-        acoes.append(botao("Ver no mapa", "pino", "", () => {
-          mapaConferir.setView([p.geo.lat, p.geo.lng], 17);
-          if (window.innerWidth < 960) $("mapa-conferir").scrollIntoView({ behavior: "smooth", block: "center" });
-          toast("Arraste o pino se precisar ajustar.");
-        }));
-        acoes.append(botao("Está certo", "check", "", () => { p.status = "manual"; desenharMarcadores(); renderAtencao(); }));
-      } else {
-        acoes.append(botao("Marcar no mapa", "pino", "", () => {
-          modoMarcar = p.id;
-          $("mapa-conferir").style.cursor = "crosshair";
-          if (window.innerWidth < 960) $("mapa-conferir").scrollIntoView({ behavior: "smooth", block: "center" });
-          toast("Toque no mapa onde fica este endereço.");
-        }));
+    if (resp.status === 401) { window.location.href = "/login"; return false; }
+    if (!resp.ok) throw new Error("Não foi possível localizar os endereços.");
+    const leitor = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      buffer += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const linha = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!linha) continue;
+        const ev = JSON.parse(linha);
+        if (ev.tipo === "inicio") geoProgresso.externos = ev.pendentes;
+        else if (ev.tipo === "resultado") {
+          const p = faltando[ev.indice];
+          if (p) p.geo = ev;
+          geoProgresso.feitos++;
+          if (!ev.de_cache) geoProgresso.externos = Math.max(0, geoProgresso.externos - 1);
+          renderGeoStatus();
+        } else if (ev.tipo === "erro") throw new Error(ev.mensagem);
       }
-      acoes.append(botao("Remover", "lixeira", "ghost", () => {
-        removerParada(p.id); desenharMarcadores(); renderAtencao(); renderParadas();
-      }));
-      if (p.geo && p.geo.descricao) {
-        const d = document.createElement("div"); d.className = "desc"; d.textContent = "Encontrado: " + p.geo.descricao;
-        li.append(topo, form, d, acoes);
-      } else li.append(topo, form, acoes);
-      ul.append(li);
     }
-    atualizarAcoes();
+    return geoProgresso.feitos > 0;
   }
 
-  // ---------------------------------------------------------------- 4. motoristas
+  function renderGeoStatus() {
+    const el = $("geo-status");
+    const ativo = !!geoRodada && geoProgresso.total > 0;
+    el.classList.toggle("hidden", !ativo);
+    if (ativo) el.querySelector("span:last-child").textContent =
+      `Preparando o mapa… ${geoProgresso.feitos} de ${geoProgresso.total}`;
+    atualizarOverlayGeo();
+  }
+
+  // ---------------------------------------------------------------- motoristas
   function renderMotoristas() {
     $("mot-qtd").textContent = estado.motoristas.length;
     $("mot-menos").disabled = estado.motoristas.length <= 1;
@@ -630,9 +426,6 @@
       label.append(s, inp);
       box.append(label);
     });
-    const n = estado.paradas.length, k = estado.motoristas.length;
-    $("resumo-calculo").textContent =
-      `${n} parada${n > 1 ? "s" : ""} para ${k} motorista${k > 1 ? "s" : ""}. O cálculo usa o modo de maior qualidade e leva cerca de ${estado.config.solver_tempo_limite_s} segundos.`;
   }
   $("mot-menos").addEventListener("click", () => { if (estado.motoristas.length > 1) estado.motoristas.pop(); renderMotoristas(); });
   $("mot-mais").addEventListener("click", () => { if (estado.motoristas.length < 20) estado.motoristas.push({ nome: "" }); renderMotoristas(); });
@@ -641,44 +434,81 @@
   const MENSAGENS = ["Calculando distâncias reais pelas ruas…", "Dividindo as paradas entre os motoristas…",
     "Agrupando endereços próximos…", "Testando combinações para encurtar o trajeto…", "Refinando a ordem das entregas…"];
 
-  function mostrarCalculando(segundos) {
-    const ov = $("calculando"), anel = $("anel"), total = 326.7;
-    ov.classList.remove("hidden");
+  const ANEL = 326.7;
+  let overlayAberto = false, timerCalculo = null;
+
+  function abrirOverlay() {
+    overlayAberto = true;
+    $("calculando").classList.remove("hidden");
+    $("anel").style.transition = "none"; $("anel").style.strokeDashoffset = ANEL;
+    requestAnimationFrame(() => { $("anel").style.transition = ""; });
+  }
+
+  function fecharOverlay() {
+    overlayAberto = false;
+    clearInterval(timerCalculo);
+    $("calculando").classList.add("hidden");
+  }
+
+  // Fase 1 (só se faltar algo): localizar endereços novos. O serviço gratuito permite 1 consulta por segundo.
+  function atualizarOverlayGeo() {
+    if (!overlayAberto || !geoRodada) return;
+    const { feitos, total, externos } = geoProgresso;
+    $("calc-titulo").textContent = "Localizando endereços";
+    $("calc-msg").textContent = `${feitos} de ${total} · endereços já usados antes são instantâneos`;
+    $("calc-seg").textContent = Math.max(1, Math.ceil(externos * 1.1));
+    $("anel").style.strokeDashoffset = ANEL * (1 - (total ? feitos / total : 0));
+  }
+
+  // Fase 2: otimizar. Mesmas faixas de app/roteamento/solver.py (FAIXAS_TEMPO_S).
+  function tempoOtimizador(n) {
+    return Math.min(n <= 15 ? 1 : n <= 40 ? 5 : Infinity, estado.config.solver_tempo_limite_s);
+  }
+
+  function faseOtimizar(segundos) {
     let passados = 0;
+    $("calc-titulo").textContent = "Otimizando as rotas";
     $("calc-seg").textContent = segundos;
-    anel.style.transition = "none"; anel.style.strokeDashoffset = total;
-    requestAnimationFrame(() => { anel.style.transition = ""; });
-    const timer = setInterval(() => {
+    $("calc-msg").textContent = MENSAGENS[0];
+    $("anel").style.strokeDashoffset = ANEL;
+    clearInterval(timerCalculo);
+    timerCalculo = setInterval(() => {
       passados++;
       $("calc-seg").textContent = Math.max(0, segundos - passados);
-      anel.style.strokeDashoffset = total * (1 - Math.min(1, passados / segundos));
+      $("anel").style.strokeDashoffset = ANEL * (1 - Math.min(1, passados / segundos));
       $("calc-msg").textContent = passados >= segundos ? "Finalizando…" : MENSAGENS[Math.floor(passados / Math.max(1, segundos / MENSAGENS.length)) % MENSAGENS.length];
     }, 1000);
-    return () => { clearInterval(timer); ov.classList.add("hidden"); };
   }
 
   async function calcular() {
-    const maxInp = $("max-por-motorista").value.trim();
-    const corpo = {
-      partida: estado.config.modo_partida === "localizacao_atual" ? { lat: estado.partida.lat, lng: estado.partida.lng } : null,
-      paradas: estado.paradas.map((p) => ({ lat: p.geo.lat, lng: p.geo.lng, endereco: p.texto })),
-      motoristas: estado.motoristas.map((m) => ({ nome: m.nome })),
-      max_por_motorista: maxInp ? Number(maxInp) : null,
-      fim: document.querySelector('input[name="fim"]:checked').value,
-    };
-    const fechar = mostrarCalculando(estado.config.solver_tempo_limite_s);
+    usarColado(); // o que estiver colado e ainda não adicionado entra também
+    if (!estado.paradas.length || !estado.partida) return;
+    abrirOverlay();
     try {
+      if (estado.paradas.some((p) => !p.geo)) {
+        atualizarOverlayGeo();
+        await localizarPendentes();
+      }
+      faseOtimizar(tempoOtimizador(estado.paradas.filter(temPosicao).length));
+      const maxInp = $("max-por-motorista").value.trim();
+      const corpo = {
+        partida: estado.config.modo_partida === "localizacao_atual" ? { lat: estado.partida.lat, lng: estado.partida.lng } : null,
+        paradas: estado.paradas.map((p) => (temPosicao(p) ? { lat: p.geo.lat, lng: p.geo.lng, endereco: p.texto } : { endereco: p.texto })),
+        motoristas: estado.motoristas.map((m) => ({ nome: m.nome })),
+        max_por_motorista: maxInp ? Number(maxInp) : null,
+        fim: document.querySelector('input[name="fim"]:checked').value,
+      };
       estado.resultado = await api("POST", "/api/calcular", corpo);
-      fechar();
+      fecharOverlay();
       renderResultado();
-      irPara(5);
+      irPara(2);
     } catch (e) {
-      fechar();
+      fecharOverlay();
       toast(e.message, "erro");
     }
   }
 
-  // ---------------------------------------------------------------- 5. resultado
+  // ---------------------------------------------------------------- 2. resultado
   let mapaResultado = null, camadaResultado = null;
 
   function ordinal(n) { return `${n}ª entrega`; }
@@ -693,7 +523,38 @@
     const linhas = [`*Rota de ${m.nome}*`, `${m.paradas.length} entrega(s) · ${fmt.km(m.distancia_m)} · cerca de ${fmt.duracao(m.duracao_s)}`, "",
       "Abra no aplicativo Google Maps para manter a ordem das paradas.", ""];
     m.trechos.forEach((t, i) => { linhas.push(`*Trecho ${i + 1}* (${descreverTrecho(t)}):`, t.url, ""); });
+    linhas.push("*Paradas*");
+    m.paradas.forEach((pi, i) => {
+      const p = estado.paradas[pi];
+      linhas.push(`${i + 1}. ${[p.texto, ...p.complementos].join(" · ")}`);
+      const info = [p.referencias.join(", "), p.telefones.join(" / "), p.pedidos.length ? "Pedido " + p.pedidos.join(", ") : "",
+        p.volumes ? `${p.volumes} vol.` : ""].filter(Boolean);
+      if (info.length) linhas.push("   " + info.join(" · "));
+      if (p.observacoes.length) linhas.push("   Obs.: " + p.observacoes.join(" / "));
+    });
     return linhas.join("\n").trim();
+  }
+
+  // Telefones da célula em dígitos com DDI 55 (para tel: e wa.me). Número sem DDD herda o DDD do anterior (ou 61).
+  function telefonesBR(texto) {
+    const lista = [];
+    let ddd = "61";
+    for (const parte of texto.split(/[\/;|,]| ou | e /)) {
+      let d = parte.replace(/\D/g, "").replace(/^0+/, "");
+      if (d.startsWith("55") && (d.length === 12 || d.length === 13)) d = d.slice(2);
+      if (d.length === 8 || d.length === 9) d = ddd + d;
+      if (d.length !== 10 && d.length !== 11) continue;
+      ddd = d.slice(0, 2);
+      lista.push({ numero: "55" + d, celular: d.length === 11 && d[2] === "9" });
+    }
+    return lista;
+  }
+
+  function botaoContato(href, rotulo, nomeIcone, extraClasse) {
+    const a = document.createElement("a"); a.className = "btn sm " + (extraClasse || ""); a.href = href;
+    if (href.startsWith("http")) { a.target = "_blank"; a.rel = "noopener"; }
+    a.append(icone(nomeIcone)); a.append(document.createTextNode(rotulo));
+    return a;
   }
 
   function stat(rotulo, valor, dica) {
@@ -710,9 +571,10 @@
     const paradas = estado.paradas;
     const alocadas = r.motoristas.reduce((s, m) => s + m.paradas.length, 0);
     const usados = r.motoristas.filter((m) => m.paradas.length).length;
+    const semMapa = new Set(r.sem_posicao || []);
     $("res-stats").replaceChildren(
       stat("Paradas nas rotas", fmt.num(alocadas), r.nao_alocadas.length ? `${r.nao_alocadas.length} não alocada(s)` : "todas alocadas"),
-      stat("Distância total", fmt.km(r.km_total * 1000)),
+      stat("Distância total", fmt.km(r.km_total * 1000), semMapa.size ? `sem contar ${semMapa.size} fora do mapa` : ""),
       stat("Tempo de direção", fmt.duracao(r.tempo_total_s), "estimado pelas ruas"),
       stat("Motoristas", `${usados} de ${r.motoristas.length}`, `cálculo em ${fmt.num(r.tempo_calculo_ms / 1000, 0)} s`),
     );
@@ -723,7 +585,7 @@
     camadaResultado = L.layerGroup().addTo(mapaResultado);
     const limites = [[r.partida.lat, r.partida.lng]];
     r.motoristas.forEach((m, mi) => {
-      if (!m.linha.length) return;
+      if (!m.linha.length) return; // sem nenhuma parada com posição: nada a desenhar
       const cor = corDe(mi), traco = tracoDe(mi);
       L.polyline(m.linha, { color: "#ffffff", weight: 8, opacity: 0.9 }).addTo(camadaResultado); // contorno (contraste)
       L.polyline(m.linha, { color: cor, weight: 4.5, opacity: 1, dashArray: traco }).addTo(camadaResultado)
@@ -731,10 +593,13 @@
       m.linha.forEach((pt) => limites.push(pt));
       m.paradas.forEach((pi, ordem) => {
         const p = paradas[pi];
-        const icon = L.divIcon({ className: "pino", iconSize: [26, 26], iconAnchor: [13, 13],
-          html: `<span style="--cor:${cor};width:26px;height:26px;color:${TINTA_SOBRE[cor] || "#fff"}">${ordem + 1}</span>` });
+        if (semMapa.has(pi)) return; // só na lista e no link: o Google Maps acha pelo texto
+        const aprox = !exata(p);
+        const icon = L.divIcon({ className: "pino" + (aprox ? " aprox" : ""), iconSize: [26, 26], iconAnchor: [13, 13],
+          html: `<span style="--cor:${cor};width:26px;height:26px;color:${aprox ? cor : TINTA_SOBRE[cor] || "#fff"}">${ordem + 1}</span>` });
         L.marker([p.geo.lat, p.geo.lng], { icon }).addTo(camadaResultado)
-          .bindTooltip(`${m.nome} · ${ordem + 1}ª: ${p.texto}`, { className: "rotulo", direction: "top", offset: [0, -12] });
+          .bindTooltip(`${m.nome} · ${ordem + 1}ª: ${p.texto}${aprox ? " (posição aproximada)" : ""}`,
+            { className: "rotulo", direction: "top", offset: [0, -12] });
       });
     });
     L.marker([r.partida.lat, r.partida.lng], { icon: pino(COR_PARTIDA, "", { tamanho: 24 }), zIndexOffset: 1000 })
@@ -796,9 +661,29 @@
       m.paradas.forEach((pi) => {
         const p = paradas[pi];
         const li = document.createElement("li"); li.textContent = p.texto;
+        if (semMapa.has(pi) || !exata(p)) {
+          const tag = document.createElement("span"); tag.className = "tag-posicao";
+          tag.textContent = semMapa.has(pi) ? "fora do mapa" : "aproximado";
+          tag.title = "O link do Google Maps leva ao endereço escrito.";
+          li.append(" ", tag);
+        }
         const extra = [...p.complementos, ...p.referencias].filter(Boolean);
+        if (p.pedidos.length) extra.push("Pedido " + p.pedidos.join(", "));
         if (p.volumes) extra.push(`${p.volumes} vol.`);
         if (extra.length) { const s = document.createElement("small"); s.textContent = extra.join(" · "); li.append(s); }
+        if (p.observacoes.length) {
+          const o = document.createElement("small"); o.className = "obs"; o.textContent = "Obs.: " + p.observacoes.join(" / "); li.append(o);
+        }
+        const tels = p.telefones.flatMap(telefonesBR);
+        const celular = tels.find((t) => t.celular);
+        if (tels.length) {
+          const acoes = document.createElement("div"); acoes.className = "contato";
+          acoes.append(botaoContato("tel:+" + (celular || tels[0]).numero, "Ligar", "telefone"));
+          if (celular) acoes.append(botaoContato("https://wa.me/" + celular.numero, "WhatsApp", "msg", "whats"));
+          li.append(acoes);
+        } else if (p.telefones.length) {
+          const t = document.createElement("small"); t.textContent = "Tel.: " + p.telefones.join(" / "); li.append(t);
+        }
         ol.append(li);
       });
       det.append(sum, ol);
@@ -821,13 +706,17 @@
 
   $("btn-exportar").addEventListener("click", (ev) => {
     const r = estado.resultado, paradas = estado.paradas;
+    const semMapa = new Set(r.sem_posicao || []);
     const corpo = {
       motoristas: r.motoristas.map((m) => ({
         nome: m.nome, distancia_m: m.distancia_m, duracao_s: m.duracao_s,
         paradas: m.paradas.map((pi) => {
           const p = paradas[pi];
           return { endereco: [p.texto, ...p.complementos].join(" · ").slice(0, 400), referencia: p.referencias.join(", ").slice(0, 200),
-            volumes: p.volumes ? String(p.volumes) : "", lat: p.geo.lat, lng: p.geo.lng };
+            telefone: p.telefones.join(" / ").slice(0, 60), pedido: p.pedidos.join(", ").slice(0, 100),
+            observacoes: p.observacoes.join(" / ").slice(0, 300),
+            volumes: p.volumes ? String(p.volumes) : "",
+            lat: semMapa.has(pi) ? null : p.geo.lat, lng: semMapa.has(pi) ? null : p.geo.lng };
         }),
         trechos: m.trechos.map((t) => ({ url: t.url })),
       })),
@@ -850,13 +739,13 @@
 
   $("btn-novo").addEventListener("click", () => $("dlg-novo").showModal());
   $("btn-novo-ok").addEventListener("click", () => {
-    estado.paradas.forEach((p) => removerParada(p.id));
+    if (controle) controle.abort();
     estado.paradas = [];
     estado.resultado = null;
     if (camadaResultado) camadaResultado.remove();
     $("dlg-novo").close();
     renderParadas();
-    irPara(estado.config.modo_partida === "endereco_fixo" || estado.partida ? 2 : 1);
+    irPara(1);
   });
 
   // ---------------------------------------------------------------- início
@@ -870,7 +759,6 @@
       if (c.partida) {
         estado.partida = c.partida;
         $("partida-fixa-texto").textContent = c.partida.endereco;
-        mostrarPartidaNoMapa(c.partida.lat, c.partida.lng, null);
       } else {
         $("partida-fixa-texto").textContent = "O administrador ainda não definiu o endereço de partida.";
       }
@@ -886,6 +774,7 @@
     }
     if (!c.geocodificacao_ativa) toast("A localização de endereços está desativada pelo administrador.", "erro");
     renderParadas();
+    renderMotoristas();
     irPara(1);
   }
   iniciar();

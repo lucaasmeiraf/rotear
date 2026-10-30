@@ -46,13 +46,12 @@ Depois, acesse `http://localhost:8001` pelo túnel SSH. O cookie de sessão é `
 
 ## Como usar
 
-O assistente de planejamento tem 5 passos e funciona igual no celular e no computador:
+O planejamento tem 2 telas e funciona igual no celular e no computador:
 
-1. **Partida:** usa a localização do aparelho, com o círculo de precisão no mapa, ou o endereço fixo definido pelo admin. Se a permissão de localização for negada, o cálculo fica bloqueado e a tela explica como liberar.
-2. **Endereços:** planilha `.xlsx` ou `.csv`, com tela de mapeamento de colunas e sugestão automática pelo nome da coluna; texto colado (um por linha); ou digitação. Linhas com o mesmo endereço viram uma parada só.
-3. **Conferir:** mostra o progresso da localização (1 consulta por segundo; o que está em cache é instantâneo). Endereços não encontrados ou aproximados ficam listados para corrigir o texto, arrastar o pino, marcar no mapa ou confirmar.
-4. **Motoristas:** quantidade (padrão 1), nomes opcionais, máximo de paradas por motorista, e se a rota termina na última entrega ou volta à partida.
-5. **Rotas:** mapa com uma cor por motorista e paradas numeradas; km e tempo pelo OSRM; trechos do Google Maps com botão de copiar; WhatsApp; exportação `.xlsx`; e a lista de não alocadas com o motivo.
+1. **Endereços:** a partida é automática (endereço fixo definido pelo admin, ou a localização do aparelho, pedida só na primeira vez). Os endereços entram por **Colar** (padrão: um por linha), **Planilha** (`.xlsx`/`.csv`, com mapeamento de colunas e sugestão automática; linhas com o mesmo endereço viram uma parada só) ou **Digitar**. O botão **Baixar modelo** entrega a planilha padrão (`app/static/modelos/modelo-entregas.xlsx`: Cliente, Telefone, E-mail, Endereço completo, Pedido, Volumes e Observações), reconhecida sem ajustar colunas; para gerá-la de novo, rode `exemplos/gerar_modelo.py`. Na mesma tela: quantos motoristas e, recolhido em "Mais opções", o máximo de paradas por motorista e se a rota volta à partida. Um botão: **Calcular rotas**.
+2. **Rotas:** mapa com uma cor por motorista e paradas numeradas; km e tempo pelo OSRM; trechos do Google Maps com botão de copiar; WhatsApp para o motorista, com a lista de paradas, cliente, telefone e observações; na ordem das paradas, botões **Ligar** e **WhatsApp** do cliente (o WhatsApp usa o celular da célula); exportação `.xlsx`.
+
+**Nenhum endereço trava o cálculo nem fica de fora.** A localização roda em segundo plano assim que os endereços entram (1 consulta por segundo; o que está em cache é instantâneo). Se o endereço exato não é encontrado, a busca tenta versões mais simples (sem CEP, lote, casa, apto; depois cada trecho sozinho, só dentro da região) e usa a quadra ou região só para decidir a ordem: o pino fica **vazado** ("posição aproximada"). Se nada é encontrado, a parada vai para o fim da rota mais curta, fica de fora do mapa e do km, e entra no link do Google Maps pelo texto. Os links sempre levam o endereço escrito, então o Google Maps encontra a porta.
 
 Nada do planejamento é salvo: os endereços vivem só na página aberta, e o navegador avisa antes de sair. Fica gravada só uma linha de métrica, sem endereços.
 
@@ -60,9 +59,9 @@ Para teste manual, use as planilhas de exemplo em `exemplos/entregas-exemplo.xls
 
 ### Cálculo
 - Matriz de tempo e distância pelo OSRM (`/table`), com uma parada por endereço mais a partida. Os testes usam `PROVEDOR_MATRIZ=haversine`.
-- **OR-Tools:** solução inicial `PATH_CHEAPEST_ARC` mais `GUIDED_LOCAL_SEARCH`, sempre. Com essa metaheurística o cálculo **usa o tempo limite inteiro**, configurado pelo admin (padrão 30 s).
+- **OR-Tools:** solução inicial `PATH_CHEAPEST_ARC` mais `GUIDED_LOCAL_SEARCH`, sempre. Essa metaheurística usa o tempo dado inteiro, então o tempo depende do tamanho: até 15 paradas, 1 s; até 40, 5 s; acima, o limite do admin (padrão 30 s). Em testes de 2026-10-30, 1 s e 30 s deram a mesma rota até 15 paradas e menos de 1% de diferença com 30 paradas e 1 motorista (faixas em `FAIXAS_TEMPO_S`, `app/roteamento/solver.py`).
 - **Objetivo:** minimizar o tempo total de direção. Com mais de um motorista, cada parada acima da média por motorista custa o equivalente a 1 h, o que equilibra a divisão.
-- **Paradas não alocadas, com motivo:** acima do limite por motorista, sem rota pelas ruas, ou fora da área (DF e entorno).
+- **Paradas sem posição confiável** (não localizadas, fora da área ou sem rota pelas ruas) não entram na otimização: vão para o fim da rota com menos paradas e para o link pelo texto (`sem_posicao` na resposta). Só fica como **não alocada** o que passar do limite de paradas por motorista.
 - **Medição de 2026-10-29:** 200 paradas e 3 motoristas levaram 0,4 s de matriz e 30 s de solver, com pico de 240 MB na API.
 
 ### Links do Google Maps

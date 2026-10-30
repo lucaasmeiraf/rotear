@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import time
 
@@ -36,23 +37,57 @@ def nivel_por_rank(rank: int) -> tuple[str, str]:
     return "baixa", "cidade"
 
 
-def variantes(endereco: str) -> list[str]:
-    """Consulta original e, para quando nada for encontrado, versões mais curtas.
+MAX_TENTATIVAS = 6  # cada tentativa custa 1 s (limite do Nominatim); só endereços difíceis usam todas
 
-    O Nominatim costuma falhar quando há um trecho intermediário (rua, setor) junto do nome do local:
-    "Congresso Nacional, Praça dos Três Poderes, Brasília - DF" não acha nada; "Congresso Nacional, Brasília, DF" acha.
+# Trechos que o OpenStreetMap quase nunca tem e que fazem a busca inteira falhar
+_CEP = re.compile(r"\b(?:cep:?\s*)?\d{5}-?\d{3}\b", re.I)
+_DETALHE = re.compile(r"\b(?:lote|lt|casa|cs|apto|apt|ap|apartamento|sala|loja|kitnet|kit|fundos|frente)\b\.?\s*(?:\d+[a-z]?\b|[a-z]\b)?",
+                      re.I)
+_NUMERO = re.compile(r"\b(?:n[º°o]|num|número)\b\.?\s*", re.I)
+_ZEROS = re.compile(r"\b0+(\d)")
+
+
+def _partes(texto: str) -> list[str]:
+    return [" ".join(p.split()) for p in texto.replace(" - ", ", ").split(",") if p.strip(" .")]
+
+
+def limpar(endereco: str) -> str:
+    """Remove CEP, lote/casa/apto e zeros à esquerda: "Riacho Fundo I, AC 02 Lote 1" -> "Riacho Fundo I, AC 2"."""
+    texto = _ZEROS.sub(r"\1", _NUMERO.sub(", ", _DETALHE.sub("", _CEP.sub("", endereco))))
+    return ", ".join(p for p in _partes(texto) if p.strip(" .-"))
+
+
+def variantes(endereco: str) -> list[tuple[str, bool]]:
+    """Consultas em ordem, como (texto, só_dentro_da_região), até achar algo.
+
+    1. O texto original.
+    2. O mesmo sem CEP, lote, casa, apto etc., e versões mais curtas: o Nominatim exige que todas as palavras
+       existam, então um trecho intermediário faz falhar ("Congresso Nacional, Praça dos Três Poderes, Brasília - DF"
+       não acha nada; "Congresso Nacional, Brasília, DF" acha).
+    3. Último recurso: cada trecho sozinho, só dentro da região, para achar ao menos o bairro ou a cidade. Nomes sem
+       número vêm primeiro ("Lago Sul", "Riacho Fundo I"), porque códigos como "AC 2" se repetem em várias cidades.
     """
-    partes = [p.strip() for p in endereco.replace(" - ", ", ").split(",") if p.strip()]
-    lista = [endereco]
+    lista: list[tuple[str, bool]] = []
+    vistas: set[str] = set()
+
+    def incluir(consulta: str, restrita: bool = False) -> None:
+        chave = ", ".join(_partes(consulta)).casefold()
+        if chave and chave not in vistas:
+            vistas.add(chave)
+            lista.append((consulta, restrita))
+
+    incluir(endereco)
+    limpo = limpar(endereco)
+    partes = _partes(limpo)
+    incluir(limpo)
     if len(partes) >= 3:
-        lista.append(", ".join([partes[0], *partes[-2:]]))  # local, cidade, UF
+        incluir(", ".join([partes[0], *partes[-2:]]))  # local, cidade, UF
     if len(partes) >= 2:
-        lista.append(", ".join([partes[0], partes[-1]]))  # local, UF
-    unicas = []
-    for v in lista:
-        if v not in unicas:
-            unicas.append(v)
-    return unicas
+        incluir(", ".join([partes[0], partes[-1]]))  # local, UF
+    trechos = [p for p in partes if len(p) > 2]  # "DF" sozinho não ajuda
+    for parte in sorted(trechos, key=lambda p: any(c.isdigit() for c in p)):
+        incluir(parte, restrita=True)
+    return lista[:MAX_TENTATIVAS]
 
 
 class Nominatim:
@@ -76,13 +111,13 @@ class Nominatim:
 
     def buscar(self, endereco: str) -> Resultado:
         """Tenta a consulta original e, só se nada for encontrado, as variantes mais curtas (cada uma respeita o limitador)."""
-        for consulta in variantes(endereco):
-            resultado = self._consultar(consulta)
+        for consulta, restrita in variantes(endereco):
+            resultado = self._consultar(consulta, restrita)
             if resultado.encontrado:
                 return resultado
         return Resultado(encontrado=False)
 
-    def _consultar(self, endereco: str) -> Resultado:
+    def _consultar(self, endereco: str, restrita: bool = False) -> Resultado:
         minlon, minlat, maxlon, maxlat = REGIAO_BBOX
         params = {
             "q": endereco,
@@ -90,7 +125,7 @@ class Nominatim:
             "countrycodes": "br",
             "limit": 1,
             "viewbox": f"{minlon},{maxlat},{maxlon},{minlat}",  # prioriza a região, sem excluir o resto
-            "bounded": 0,
+            "bounded": 1 if restrita else 0,
             "accept-language": "pt-BR",
             "email": self.email,
         }
@@ -109,6 +144,8 @@ class Nominatim:
         r = dados[0]
         lat, lng = float(r["lat"]), float(r["lon"])
         precisao, nivel = nivel_por_rank(int(r.get("place_rank", 0)))
+        if restrita:  # achou só um pedaço do endereço
+            precisao = "baixa"
         if not dentro_da_regiao(lat, lng):
             precisao, nivel = "baixa", "fora_da_area"
         return Resultado(True, lat, lng, precisao, nivel, r.get("display_name"))

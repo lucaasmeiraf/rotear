@@ -15,6 +15,8 @@ POR_TRECHO = MAX_WAYPOINTS + 1  # entregas novas por trecho
 
 
 def _coord(p: Ponto) -> str:
+    if p.lat is None:  # sem posição: o Google Maps acha pelo texto
+        return p.texto or ""
     return f"{p.lat:.6f},{p.lng:.6f}"
 
 

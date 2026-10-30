@@ -21,8 +21,11 @@ SINONIMOS = {
     "cidade": ["cidade", "municipio", "localidade"],
     "uf": ["uf", "estado"],
     "cep": ["cep", "codigopostal"],
-    "referencia": ["nome", "referencia", "ref", "destinatario", "cliente", "pedido", "identificacao", "id"],
+    "referencia": ["nome", "referencia", "ref", "destinatario", "cliente", "identificacao", "id"],
     "volumes": ["volumes", "volume", "qtd", "qtde", "quantidade", "vol", "caixas", "itens"],
+    "telefone": ["telefone", "celular", "whatsapp", "fone", "tel", "contato"],
+    "pedido": ["pedido", "numeropedido", "nf", "notafiscal", "nota"],
+    "observacoes": ["observacoes", "observacao", "obs", "recado"],
 }
 
 

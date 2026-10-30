@@ -21,7 +21,7 @@ from app.models import MetricaUso, Usuario
 from app.roteamento import Ponto
 from app.roteamento.links import trechos
 from app.roteamento.matriz import MatrizIndisponivel, obter_provedor
-from app.roteamento.solver import resolver
+from app.roteamento.solver import MOTIVO_LIMITE, resolver, tempo_para
 from app.rotas.admin import obter_configuracao
 
 router = APIRouter()
@@ -58,7 +58,10 @@ class PontoIn(BaseModel):
     lng: float = Field(ge=-74, le=-34)
 
 
-class ParadaIn(PontoIn):
+class ParadaIn(BaseModel):
+    """Sem lat/lng (endereço não localizado), a parada entra no fim de uma rota e vai para o Google Maps pelo texto."""
+    lat: float | None = Field(default=None, ge=-34, le=6)
+    lng: float | None = Field(default=None, ge=-74, le=-34)
     endereco: str = Field(min_length=1, max_length=400)
 
 
@@ -100,37 +103,57 @@ def calcular(dados: CalculoIn, usuario: Usuario = Depends(exigir_login), db: Ses
         raise HTTPException(422, "O ponto de partida está fora da área atendida pelas rotas (DF e entorno).")
 
     paradas = [Ponto(p.lat, p.lng, p.endereco) for p in dados.paradas]
-    fora = [i for i, p in enumerate(paradas) if not dentro_da_regiao(p.lat, p.lng)]
+    # Nenhuma parada fica de fora: as que não têm posição confiável no mapa (não localizadas, fora da área ou sem rota
+    # pelas ruas) não entram na otimização e vão para o fim da rota mais curta; o link leva o texto ao Google Maps.
+    com_posicao = [i for i, p in enumerate(paradas)
+                   if p.lat is not None and p.lng is not None and dentro_da_regiao(p.lat, p.lng)]
+    sem_posicao = sorted(set(range(len(paradas))) - set(com_posicao))
     retorno = dados.fim == "partida"
     provedor = obter_provedor()
+    n_mot, limite = len(dados.motoristas), dados.max_por_motorista
 
     inicio = time.monotonic()
     with _calculos:
-        try:
-            duracoes, distancias = provedor.matriz([partida, *paradas])
-        except MatrizIndisponivel as exc:
-            raise HTTPException(503, str(exc)) from None
-        for i in fora:  # sem rota possível: fora da área do mapa de ruas
-            duracoes[0][i + 1] = duracoes[i + 1][0] = None
-        solucao = resolver(duracoes, len(dados.motoristas), dados.max_por_motorista, retorno, cfg.solver_tempo_limite_s)
+        rotas: list[list[int]] = [[] for _ in range(n_mot)]
+        nao_alocadas: dict[int, str] = {}
+        if com_posicao:
+            try:
+                duracoes, _ = provedor.matriz([partida, *[paradas[i] for i in com_posicao]])
+            except MatrizIndisponivel as exc:
+                raise HTTPException(503, str(exc)) from None
+            solucao = resolver(duracoes, n_mot, limite, retorno, tempo_para(len(com_posicao), cfg.solver_tempo_limite_s))
+            rotas = [[com_posicao[i] for i in rota] for rota in solucao.rotas]
+            for i, motivo in solucao.nao_alocadas.items():
+                if motivo == MOTIVO_LIMITE:
+                    nao_alocadas[com_posicao[i]] = motivo
+                else:
+                    sem_posicao.append(com_posicao[i])
+        for i in sorted(sem_posicao):
+            livres = [r for r in rotas if not limite or len(r) < limite]
+            if livres:
+                min(livres, key=len).append(i)
+            else:
+                nao_alocadas[i] = MOTIVO_LIMITE
         tempo_calculo_ms = int((time.monotonic() - inicio) * 1000)
 
+        sem_mapa = set(sem_posicao)
+        # No link, parada sem posição vai só pelo texto (nunca por uma coordenada errada)
+        para_link = [Ponto(None, None, p.texto) if i in sem_mapa else p for i, p in enumerate(paradas)]
         motoristas = []
-        for m, rota in zip(dados.motoristas, solucao.rotas):
+        for m, rota in zip(dados.motoristas, rotas):
             item = {"nome": m.nome, "paradas": rota, "distancia_m": 0.0, "duracao_s": 0.0, "linha": [], "trechos": []}
             if rota:
-                seq = [partida, *[paradas[i] for i in rota]] + ([partida] if retorno else [])
-                try:
-                    item["distancia_m"], item["duracao_s"], item["linha"] = provedor.rota(seq)
-                except MatrizIndisponivel as exc:
-                    raise HTTPException(503, str(exc)) from None
-                item["trechos"] = trechos(partida, [paradas[i] for i in rota], retorno)
+                no_mapa = [paradas[i] for i in rota if i not in sem_mapa]
+                seq = [partida, *no_mapa] + ([partida] if retorno else [])
+                if len(seq) > 1:
+                    try:
+                        item["distancia_m"], item["duracao_s"], item["linha"] = provedor.rota(seq)
+                    except MatrizIndisponivel as exc:
+                        raise HTTPException(503, str(exc)) from None
+                item["trechos"] = trechos(partida, [para_link[i] for i in rota], retorno)
             motoristas.append(item)
 
-    nao_alocadas = [
-        {"indice": i, "motivo": "Fora da área atendida pelas rotas (DF e entorno)." if i in fora else motivo}
-        for i, motivo in sorted(solucao.nao_alocadas.items())
-    ]
+    nao_alocadas = [{"indice": i, "motivo": motivo} for i, motivo in sorted(nao_alocadas.items())]
     km_total = sum(m["distancia_m"] for m in motoristas) / 1000
     tempo_total = sum(m["duracao_s"] for m in motoristas)
     db.add(MetricaUso(usuario_id=usuario.id, qtd_paradas=len(paradas), qtd_motoristas=len(dados.motoristas),
@@ -141,6 +164,7 @@ def calcular(dados: CalculoIn, usuario: Usuario = Depends(exigir_login), db: Ses
         "fim": dados.fim,
         "motoristas": motoristas,
         "nao_alocadas": nao_alocadas,
+        "sem_posicao": sorted(sem_posicao),  # nas rotas, mas sem ponto confiável no mapa (fora do km/tempo)
         "km_total": round(km_total, 2),
         "tempo_total_s": int(tempo_total),
         "tempo_calculo_ms": tempo_calculo_ms,
@@ -154,8 +178,11 @@ class ParadaExport(BaseModel):
     endereco: str = Field(max_length=400)
     referencia: str = Field(default="", max_length=200)
     volumes: str = Field(default="", max_length=20)
-    lat: float
-    lng: float
+    telefone: str = Field(default="", max_length=60)
+    pedido: str = Field(default="", max_length=100)
+    observacoes: str = Field(default="", max_length=300)
+    lat: float | None = None
+    lng: float | None = None
 
 
 class TrechoExport(BaseModel):
@@ -195,10 +222,12 @@ def exportar_xlsx(dados: ExportIn, _: Usuario = Depends(exigir_login)):
 
     ws = wb.active
     ws.title = "Rotas"
-    preparar(ws, ["Motorista", "Ordem", "Endereço", "Referência", "Volumes", "Latitude", "Longitude"], [18, 8, 60, 28, 10, 12, 12])
+    preparar(ws, ["Motorista", "Ordem", "Endereço", "Cliente / referência", "Telefone", "Pedido", "Volumes", "Observações",
+                  "Latitude", "Longitude"], [18, 8, 60, 28, 18, 12, 10, 36, 12, 12])
     for m in dados.motoristas:
         for ordem, p in enumerate(m.paradas, start=1):
-            ws.append([m.nome, ordem, p.endereco, p.referencia, p.volumes, round(p.lat, 6), round(p.lng, 6)])
+            ws.append([m.nome, ordem, p.endereco, p.referencia, p.telefone, p.pedido, p.volumes, p.observacoes,
+                       round(p.lat, 6) if p.lat is not None else None, round(p.lng, 6) if p.lng is not None else None])
 
     resumo = wb.create_sheet("Resumo")
     preparar(resumo, ["Motorista", "Paradas", "Km", "Tempo estimado (min)"], [18, 10, 10, 22])

@@ -166,26 +166,48 @@ def test_nominatim_exige_email(monkeypatch):
 def test_variantes_da_consulta():
     from app.geocodificacao.nominatim import variantes
     assert variantes("Congresso Nacional, Praça dos Três Poderes, Brasília - DF") == [
-        "Congresso Nacional, Praça dos Três Poderes, Brasília - DF",
-        "Congresso Nacional, Brasília, DF",
-        "Congresso Nacional, DF",
+        ("Congresso Nacional, Praça dos Três Poderes, Brasília - DF", False),
+        ("Congresso Nacional, Brasília, DF", False),
+        ("Congresso Nacional, DF", False),
+        ("Congresso Nacional", True),
+        ("Praça dos Três Poderes", True),
+        ("Brasília", True),
     ]
-    assert variantes("Rua A") == ["Rua A"]
-    assert variantes("Parque X, Guará - DF") == ["Parque X, Guará - DF", "Parque X, Guará, DF", "Parque X, DF"]
+    assert variantes("Rua A") == [("Rua A", False)]
+    # sem lote/zeros; no último recurso, nomes de região antes de códigos de quadra
+    assert variantes("Riacho fundo I, AC 02 Lote 1") == [
+        ("Riacho fundo I, AC 02 Lote 1", False), ("Riacho fundo I, AC 2", False), ("Riacho fundo I", True), ("AC 2", True)]
+
+
+def test_limpar_endereco():
+    from app.geocodificacao.nominatim import limpar
+    assert limpar("SHIS QI 15 Conjunto 08 Casa 03, Lago Sul, Brasília - DF, CEP 71635-080") == "SHIS QI 15 Conjunto 8, Lago Sul, Brasília, DF"
+    assert limpar("SQS 308 Bloco C Apto 101, Asa Sul") == "SQS 308 Bloco C, Asa Sul"  # bloco fica: o OSM tem os blocos
+    assert limpar("Rua 12 nº 340, Gama - DF") == "Rua 12, 340, Gama, DF"
 
 
 def test_nominatim_tenta_variante_so_quando_nao_encontra():
     consultas = []
 
     def handler(req):
-        consultas.append(req.url.params["q"])
+        consultas.append((req.url.params["q"], req.url.params["bounded"]))
         if req.url.params["q"] == "Congresso Nacional, Brasília, DF":
             return httpx.Response(200, json=[{"lat": "-15.80", "lon": "-47.86", "place_rank": 30, "display_name": "Congresso"}])
         return httpx.Response(200, json=[])
 
     n = _nominatim_simulado(handler, intervalo=0)
     assert n.buscar("Congresso Nacional, Praça dos Três Poderes, Brasília - DF").encontrado
-    assert consultas == ["Congresso Nacional, Praça dos Três Poderes, Brasília - DF", "Congresso Nacional, Brasília, DF"]
+    assert [q for q, _ in consultas] == ["Congresso Nacional, Praça dos Três Poderes, Brasília - DF", "Congresso Nacional, Brasília, DF"]
     consultas.clear()
     assert n.buscar("Inexistente, Lugar, Nenhum - XX").encontrado is False
-    assert len(consultas) == 3  # no máximo 2 tentativas extras
+    assert len(consultas) <= 6 and consultas[-1][1] == "1"  # último recurso só dentro da região
+
+
+def test_nominatim_trecho_sozinho_vira_aproximado():
+    def handler(req):
+        if req.url.params["q"] == "Riacho fundo I":
+            return httpx.Response(200, json=[{"lat": "-15.88", "lon": "-48.01", "place_rank": 30, "display_name": "Riacho Fundo"}])
+        return httpx.Response(200, json=[])
+
+    r = _nominatim_simulado(handler, intervalo=0).buscar("Riacho fundo I, AC 02 Lote 1")
+    assert (r.encontrado, r.precisao) == (True, "baixa")

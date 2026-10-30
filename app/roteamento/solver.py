@@ -15,7 +15,19 @@ PENALIDADE_DESCARTE = 10**9  # só descarta uma parada se for impossível atend�
 PESO_EQUILIBRIO_S = 3600  # cada parada acima da média por motorista "custa" 1 h de direção (equilíbrio forte)
 
 MOTIVO_SEM_ROTA = "Sem rota pelas ruas a partir do ponto de partida."
+# Faixas de tempo do otimizador por número de paradas (o limite do admin vale acima delas). Em testes,
+# 1 s e 30 s deram a mesma rota até ~15 paradas; até ~40 a diferença ficou abaixo de 1%.
+# planejar.js repete estas faixas para o contador da tela de cálculo.
+FAIXAS_TEMPO_S = ((15, 1), (40, 5))
 MOTIVO_LIMITE = "Excede o limite de paradas por motorista."
+
+
+def tempo_para(n_paradas: int, limite_s: int) -> int:
+    """Tempo do otimizador: curto para poucas paradas, o limite configurado para muitas."""
+    for ate, segundos in FAIXAS_TEMPO_S:
+        if n_paradas <= ate:
+            return min(segundos, limite_s)
+    return limite_s
 
 
 @dataclass
